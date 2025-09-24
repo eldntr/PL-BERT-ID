@@ -8,7 +8,7 @@ import pandas as pd
 from lingua import Language, LanguageDetectorBuilder
 import warnings
 from tqdm import tqdm
-from text_normalize import normalize_text, remove_accents
+from transformers import TransfoXLTokenizer
 
 warnings.filterwarnings("ignore", message="Trying to detect language from a single word.")
 
@@ -70,7 +70,7 @@ class EnIndPhonemizer:
 
 def phonemize(text, global_phonemizer, tokenizer):
     """Fungsi kompatibilitas untuk kode lama"""
-    text = normalize_text(remove_accents(text))
+    # text = normalize_text(remove_accents(text)) Tidak perlu dinormalisasi karena espeak sudah bisa menangani
     words = tokenizer.tokenize(text)
     
     phonemes_bad = [phonemize_word(word, True, True, "") if word not in string.punctuation else word for word in words]
@@ -81,11 +81,11 @@ def phonemize(text, global_phonemizer, tokenizer):
         word = words[i]
         phoneme = phonemes_bad[i]
         
-        # Hanya proses kasus khusus untuk "@" (email, mention)
-        if "@" in word and len(word) > 1: # remove "@"
-            phonemes.append(word.replace('@', ''))
-            input_ids.append(tokenizer.encode(word.replace('@', ''))[0])
-            continue
+        # # Hanya proses kasus khusus untuk "@" (email, mention)
+        # if "@" in word and len(word) > 1: # remove "@"
+        #     phonemes.append(word.replace('@', ''))
+        #     input_ids.append(tokenizer.encode(word.replace('@', ''))[0])
+        #     continue
         
         input_ids.append(tokenizer.encode(word)[0])
         phonemes.append(phoneme)
@@ -99,26 +99,36 @@ def main():
     print("TEST INDONESIAN & ENGLISH PHONEMIZER")
     print("=" * 60)
     
+    import os
+    os.environ['TRUST_REMOTE_CODE'] = 'True'
+    
     # Initialize phonemizer
-    phonemizer = EnIndPhonemizer(ipa=True, keep_stress=True)
+    phonemizer_instance = EnIndPhonemizer(ipa=True, keep_stress=True)
+    tokenizer = TransfoXLTokenizer.from_pretrained('transfo-xl-wt103')
     
     # Test sentences in Indonesian and English
     test_sentences = [
-        "saya belajar bahasa Indonesia",
-        "hello world",
-        "selamat pagi teman-teman",
-        "learning is fun",
-        "Jakarta adalah ibu kota Indonesia",
-        "I love programming"
+        "Muhammad Anwar el-Sadat; ) adalah seorang politikus Mesir yang menjabat sebagai presiden Mesir ketiga, dari 15 Oktober 1970 hingga pembunuhannya oleh perwira tentara fundamentalis pada 6 Oktober 1981.",
+        "This is an example sentence in English.",
+        "Muhammad Anwar el-Sadat adalah seorang politikus Mesir.",
+        "He was the third President of Egypt.",
+        "Pada tahun 1978, Sadat dan Menachem Begin menandatangani perjanjian damai.",
+        "They were awarded the Nobel Peace Prize.",
+        "Saya suka makan nasi goreng.",
+        "I like to eat fried rice.",
+        "Selamat pagi, apa kabar?",
+        "Good morning, how are you?",
+        "eldintaro@gmail.com"
     ]
     
     print("\nTesting sentences:")
     print("-" * 40)
     
     for sentence in test_sentences:
-        phoneme_result = phonemizer.phonemize(sentence)
+        phoneme_result = phonemize(sentence, phonemizer_instance, tokenizer)
         print(f"Text:    {sentence}")
-        print(f"Phoneme: {phoneme_result}")
+        print(f"Input IDs: {phoneme_result['input_ids']}")
+        print(f"Phonemes: {phoneme_result['phonemes']}")
         print()
     
     print("Test completed!")
