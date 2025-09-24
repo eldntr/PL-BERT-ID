@@ -79,49 +79,200 @@ class Money:
         self.filter_regex = re.compile(r"[, ]")
 
         # Suffixes for currencies with decimal support
-        # In a perfect world this dict would contain all currencies
+                # In a perfect world this dict would contain all currencies
         self.currencies = {
-            "$": {
+            "Rp": {
                 "number":{
-                    "singular": "dollar",
-                    "plural":   "dollars"
+                    "singular": "rupiah",
+                    "plural":   "rupiah"
                 },
                 "decimal":{
-                    "singular": "cent",
-                    "plural":   "cents"
+                    "singular": "sen",
+                    "plural":   "sen"
+                }
+            },
+            "IDR": {
+                "number":{
+                    "singular": "rupiah",
+                    "plural":   "rupiah"
+                },
+                "decimal":{
+                    "singular": "sen",
+                    "plural":   "sen"
+                }
+            },
+            "$": {
+                "number":{
+                    "singular": "dolar",
+                    "plural":   "dolar"
+                },
+                "decimal":{
+                    "singular": "sen",
+                    "plural":   "sen"
                 }
             },
             "usd": {
                 "number":{
-                    "singular": "united states dollar",
-                    "plural":   "united states dollars"
+                    "singular": "dolar amerika serikat",
+                    "plural":   "dolar amerika serikat"
                 },
                 "decimal":{
-                    "singular": "cent",
-                    "plural":   "cents"
+                    "singular": "sen",
+                    "plural":   "sen"
                 }
             },
             "€": {
                 "number":{
                     "singular": "euro",
-                    "plural":   "euros"
+                    "plural":   "euro"
                 },
                 "decimal":{
-                    "singular": "cent",
-                    "plural":   "cents"
+                    "singular": "sen",
+                    "plural":   "sen"
                 }
             },
             "£": {
                 "number":{
                     "singular": "pound",
-                    "plural":   "pounds"
+                    "plural":   "pound"
                 },
                 "decimal":{
                     "singular": "penny",
                     "plural":   "pence"
                 }
+            },
+            "¥": {
+                "number":{
+                    "singular": "yen",
+                    "plural":   "yen"
+                },
+                "decimal":{
+                    "singular": "sen",
+                    "plural":   "sen"
+                }
+            },
+            "₩": {
+                "number":{
+                    "singular": "won",
+                    "plural":   "won"
+                },
+                "decimal":{
+                    "singular": "jeon",
+                    "plural":   "jeon"
+                }
             }
         }
+
+        # Create a regex to detect all currencies
+        self.currency_regex = re.compile(f"({'|'.join(self.currencies.keys())})", flags=re.I)
+
+        # Suffixes for large numbers
+        self.suffixes = {
+            "k":    10**3,
+            "thousand": 10**3,
+            "m":    10**6,
+            "million":  10**6,
+            "b":    10**9,
+            "bn":   10**9,
+            "billion":  10**9,
+            "t":    10**12,
+            "trillion": 10**12,
+            "lakh": 10**5,
+            "crore":    10**7,
+            "ribu": 10**3,
+            "juta": 10**6,
+            "miliar": 10**9,
+            "triliun": 10**12
+        }
+        # Create a regex to detect all suffixes
+        self.suffix_regex = re.compile(f"({'|'.join(self.suffixes.keys())})", flags=re.I)
+
+        # Cardinal and Digit conversion
+        self.cardinal = Cardinal()
+        self.digit = Digit()
+    
+    def convert(self, token: str) -> str:
+        # 1 Remove commas and spaces
+        token = self.filter_regex.sub("", token)
+
+        # Variables to store values from the input string
+        before = ""
+        number = ""
+        decimal = ""
+        after = ""
+
+        # 2 Try to match a decimal of roughly the form x.y
+        match = self.decimal_regex.match(token)
+        if match:
+            # Get the values before and after the dot
+            before, number, decimal, after = match.groups()
+        else:
+            # 3 Otherwise, try to match an integer
+            match = self.number_regex.match(token)
+            if match:
+                before, number, after = match.groups()
+
+        # 4 Check the text before the number for a currency
+        currency = None
+        match = self.currency_regex.search(before)
+        if match:
+            currency = self.currencies[match.group(1).lower()]
+        
+        # 5 Check after for currency and or suffixes
+        suffix = None
+        if after:
+            # 5.1 Match from start of after, no case, to try and find suffixes like "thousand", "million", "bn"
+            match = self.suffix_regex.match(after)
+            if match:
+                suffix = match.group(1).lower()
+                after = after[match.span()[1]:]
+
+            # 5.2 Match from start of after, no case, try to find currencies
+            match = self.currency_regex.match(after)
+            if match:
+                currency = self.currencies[match.group(1).lower()]
+                after = after[match.span()[1]:]
+
+        # Make list for output
+        result_list = []
+
+        # 6 If there is decimal support for the currency, and no scale ("thousand", "million", etc.),
+        # then output should be like "x euro y cents ..."
+        if currency and "decimal" in currency and not suffix:
+            # Add the number part
+            if number:
+                result_list.append(self.cardinal.convert(number))
+                if int(number) == 1:
+                    result_list.append(currency["number"]["singular"])
+                else:
+                    result_list.append(currency["number"]["plural"])
+            
+            # Add the decimal part
+            if decimal:
+                if number:
+                    result_list.append("dan")
+                result_list.append(self.cardinal.convert(decimal))
+                if int(decimal) == 1:
+                    result_list.append(currency["decimal"]["singular"])
+                else:
+                    result_list.append(currency["decimal"]["plural"])
+        else:
+            # 7 Otherwise, output should be like "x point y ..."
+            if number:
+                result_list.append(self.cardinal.convert(number))
+            if decimal:
+                result_list.append("koma")
+                result_list.append(self.digit.convert(decimal))
+            if suffix:
+                result_list.append(suffix)
+            if currency:
+                result_list.append(currency["number"]["plural"])
+        
+        # 8 Finally, append a potential remaining suffix
+        if after:
+            result_list.append(after)
+
+        return " ".join(result_list)
 
         # Suffixes for currencies
         with open(os.path.join(os.path.dirname(__file__), "money.json"), "r") as f:

@@ -33,7 +33,7 @@ class Date:
         # Regex to remove dots
         self.filter_regex = re.compile(r"[,']")
         # Regex to check for a prefixed day
-        self.day_regex = re.compile(r"^(?P<prefix>monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\.?", flags=re.I)
+        self.day_regex = re.compile(r"^(?P<prefix>senin|selasa|rabu|kamis|jumat|sabtu|minggu)\.?", flags=re.I)
 
         # Regex to check for yyyy-mm-dd date
         self.dash_date_ymd_regex = re.compile(r"^(?P<year>\d{2,5}) *(?:-|\.|/) *(?P<month>\d{1,2}) *(?:-|\.|/) *(?P<day>\d{1,2})$", flags=re.I)
@@ -41,75 +41,73 @@ class Date:
         self.dash_date_mdy_regex = re.compile(r"^(?P<month>\d{1,2}) *(?:-|\.|/) *(?P<day>\d{1,2}) *(?:-|\.|/) *(?P<year>\d{2,5})$", flags=re.I)
 
         # Regex to check for YYYY-Month-DD
-        self.text_ymd_regex = re.compile(r"^(?P<year>\d{2,5}) *(?:-|\.|/) *(?P<month>january|february|march|april|may|june|july|august|september|october|november|december|sept|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec) *(?:-|\.|/) *(?P<day>\d{1,2})$", flags=re.I)
+        self.text_ymd_regex = re.compile(r"^(?P<year>\d{2,5}) *(?:-|\.|/) *(?P<month>januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember) *(?:-|\.|/) *(?P<day>\d{1,2})$", flags=re.I)
         # Regex to check for DD-Month-YYYY
-        self.text_dmy_regex = re.compile(r"^(?P<day>\d{1,2}) *(?:-|\.|/) *(?P<month>january|february|march|april|may|june|july|august|september|october|november|december|sept|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec) *(?:-|\.|/) *(?P<year>\d{2,5})$", flags=re.I)
+        self.text_dmy_regex = re.compile(r"^(?P<day>\d{1,2}) *(?:-|\.|/) *(?P<month>januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember) *(?:-|\.|/) *(?P<year>\d{2,5})$", flags=re.I)
         # Regex to check for Month-DD-YYYY
-        self.text_mdy_regex = re.compile(r"^(?P<month>january|february|march|april|may|june|july|august|september|october|november|december|sept|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec) *(?:-|\.|/) *(?P<day>\d{1,2}) *(?:-|\.|/) *(?P<year>\d{2,5})$", flags=re.I)
+        self.text_mdy_regex = re.compile(r"^(?P<month>januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember) *(?:-|\.|/) *(?P<day>\d{1,2}) *(?:-|\.|/) *(?P<year>\d{2,5})$", flags=re.I)
 
         # Regex to check for DD Month YYYY, Month YYYY, YYYY or YYYYs
-        self.dmy_regex = re.compile(r"^(?:(?:(?P<day>\d{1,2}) +(of +)?)?(?P<month>january|february|march|april|may|june|july|august|september|october|november|december|sept|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\.? +)?(?P<year>\d{1,5})(?P<suffix>s?)\/?(?: *(?P<bcsuffix>[A-Z\.]+)?)$", flags=re.I)
+        self.dmy_regex = re.compile(r"^(?:(?:(?P<day>\d{1,2}) +(of +)?)?(?P<month>januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\.? +)?(?P<year>\d{1,5})(?P<suffix>s?)\/?(?: *(?P<bcsuffix>[A-Z\.]+)?)$", flags=re.I)
         # Regex to check for Month DD, YYYY
-        self.mdy_regex = re.compile(r"^(?P<month>january|february|march|april|may|june|july|august|september|october|november|december|sept|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)?\.? *(?P<day>\d{1,2})? +(?P<year>\d{1,5})(?P<suffix>s?)\/?(?: *(?P<bcsuffix>[A-Z\.]+)?)$", flags=re.I)
+        self.mdy_regex = re.compile(r"^(?P<month>januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)?\.? *(?P<day>\d{1,2})? +(?P<year>\d{1,5})(?P<suffix>s?)\/?(?: *(?P<bcsuffix>[A-Z\.]+)?)$", flags=re.I)
 
         # Regex to check for DD Month
-        self.dm_regex = re.compile(r"^(?P<day>\d{1,2}) +(of +)?(?P<month>january|february|march|april|may|june|july|august|september|october|november|december|sept|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\.?(?: *(?P<bcsuffix>[A-Z\.]+)?)$", flags=re.I)
+        self.dm_regex = re.compile(r"^(?P<day>\d{1,2}) +(of +)?(?P<month>januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\.?(?: *(?P<bcsuffix>[A-Z\.]+)?)$", flags=re.I)
         # Regex to check for Month DD
-        self.md_regex = re.compile(r"^(?P<month>january|february|march|april|may|june|july|august|september|october|november|december|sept|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\.? +(?P<day>\d{1,2})(?: *(?P<bcsuffix>[A-Z\.]+)?)$", flags=re.I)
+        self.md_regex = re.compile(r"^(?P<month>januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\.? +(?P<day>\d{1,2})(?: *(?P<bcsuffix>[A-Z\.]+)?)$", flags=re.I)
 
         # Regex to find "th" in "5th", "nd" in "22nd", "rd" in "3rd", without matching "thursday", "monday", etc.
         self.th_regex = re.compile(r"(?:(?<=\d)|(?<=\d ))(?:th|nd|rd|st)", flags=re.I)
 
         # Translation dict to convert potential months to the correct format
         self.trans_month_dict = {
-            "jan": "january",
-            "feb": "february",
-            "mar": "march",
+            "jan": "januari",
+            "feb": "februari",
+            "mar": "maret",
             "apr": "april",
-            #"may": "may",
-            "jun": "june",
-            "jul": "july",
-            "aug": "august",
+            "mei": "mei",
+            "jun": "juni",
+            "jul": "juli",
+            "agu": "agustus",
             "sep": "september",
-            "oct": "october",
+            "okt": "oktober",
             "nov": "november",
-            "dec": "december",
+            "des": "desember",
 
-            "sept": "september",
-
-            "01": "january",
-            "02": "february",
-            "03": "march",
+            "01": "januari",
+            "02": "februari",
+            "03": "maret",
             "04": "april",
-            "05": "may",
-            "06": "june",
-            "07": "july",
-            "08": "august",
+            "05": "mei",
+            "06": "juni",
+            "07": "juli",
+            "08": "agustus",
             "09": "september",
-            "10": "october",
+            "10": "oktober",
             "11": "november",
-            "12": "december",
+            "12": "desember",
 
-            "1": "january",
-            "2": "february",
-            "3": "march",
+            "1": "januari",
+            "2": "februari",
+            "3": "maret",
             "4": "april",
-            "5": "may",
-            "6": "june",
-            "7": "july",
-            "8": "august",
+            "5": "mei",
+            "6": "juni",
+            "7": "juli",
+            "8": "agustus",
             "9": "september",
         }
 
         # Translation dict to convert days to the correct format
         self.trans_day_dict = {
-            "mon": "monday",
-            "tue": "tuesday",
-            "wed": "wednesday",
-            "thu": "thursday",
-            "fri": "friday",
-            "sat": "saturday",
-            "sun": "sunday",
+            "sen": "senin",
+            "sel": "selasa",
+            "rab": "rabu",
+            "kam": "kamis",
+            "jum": "jumat",
+            "sab": "sabtu",
+            "min": "minggu",
         }
 
         # Cardinal and Ordinal conversion

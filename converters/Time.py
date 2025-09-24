@@ -55,30 +55,17 @@ class Time:
             # Extract hour, minute and suffix from the match
             hour, minute, suffix = match.group("hour"), match.group("minute"), match.group("suffix")
 
-            # Boolean to track whether the time is suffixed with "am" or "pm"
-            ampm = self.filter_regex.sub("", suffix).lower().startswith(("am", "pm"))
-
-            # 2.1 If ampm is prepended, we say "one p m" when hour is "13", but "thirteen" if there is no "pm" or "am"
-            if ampm:
-                result_list.append(self.cardinal.convert(self.modulo_hour(hour)))
-            else:
-                result_list.append(self.cardinal.convert(hour))
+            # 2.1 Add the hour
+            result_list.append(self.cardinal.convert(hour))
 
             # 2.2 Add the minute if it exists and is not just zeros
             if minute and minute != "00":
-                if minute[0] == "0":
-                    result_list.append("o")
                 result_list.append(self.cardinal.convert(minute))
+            # 2.3 If there is no minute, add "tepat"
+            elif minute == "00":
+                result_list.append("tepat")
 
-            elif not ampm:
-                # 2.3 If there is no minute, add either "hundred" or "o'clock", unless "pm" exists. 
-                # Eg "12:00 pm" -> "twelve p m", without "hundred" or "o'clock"
-                if int(hour) > 12 or int(hour) == 0:
-                    result_list.append("hundred")
-                else:
-                    result_list.append("o'clock")
-
-            # 2.4 Prepend the suffix with padded spaces
+            # 2.4 Add the suffix, eg pm
             if suffix:
                 result_list += [c for c in suffix.lower() if c not in (" ", ".")]
             
@@ -90,26 +77,26 @@ class Time:
             # Extract values from match
             hour, minute, seconds, milliseconds, suffix = match.group("hour"), match.group("minute"), match.group("seconds"), match.group("milliseconds"), match.group("suffix")
 
-            # 3.1 If hour, add it as cardinal and add "hour" with proper plurality
+            # 3.1 If hour, add it as cardinal and add "jam"
             if hour:
                 result_list.append(self.cardinal.convert(hour))
-                result_list.append("hour" if int(hour) == 1 else "hours")
-            # 3.2 If minute, add it as cardinal and add "minute" with proper plurality
+                result_list.append("jam")
+            # 3.2 If minute, add it as cardinal and add "menit"
             if minute:
                 result_list.append(self.cardinal.convert(minute))
-                result_list.append("minute" if int(minute) == 1 else "minutes")
-            # 3.3 If seconds, add "and" if seconds is the last number, add seconds as cardinal, and "second" with proper plurality
+                result_list.append("menit")
+            # 3.3 If seconds, add "lewat", add seconds as cardinal, and "detik"
             if seconds:
-                if not milliseconds:
-                    result_list.append("and")
+                result_list.append("lewat")
                 result_list.append(self.cardinal.convert(seconds))
-                result_list.append("second" if int(seconds) == 1 else "seconds")
-            # 3.4 If milliseconds, add "and", milliseconds as cardinal, and "millisecond" with proper plurality
+                result_list.append("detik")
+            # 3.4 If milliseconds, add "lewat", milliseconds as cardinal, and "milidetik"
             if milliseconds:
-                result_list.append("and")
+                if not seconds:
+                    result_list.append("lewat")
                 result_list.append(self.cardinal.convert(milliseconds))
-                result_list.append("millisecond" if int(milliseconds) == 1 else "milliseconds")
-            # 3.5 If suffix, prepend the suffix with padded spaces
+                result_list.append("milidetik")
+            # 3.5 If suffix, add the suffix
             if suffix:
                 result_list += [c for c in suffix.lower() if c not in (" ", ".")]
             
@@ -121,20 +108,14 @@ class Time:
             # Extract values from match
             hour, suffix = match.group("hour"), match.group("suffix")
 
-            # Boolean to track whether the time is suffixed with "am" or "pm"
-            ampm = self.filter_regex.sub("", suffix).lower().startswith(("am", "pm"))
-
-            # 4.1 If ampm is prepended, we say "one p m" when hour is "13", but "thirteen" if there is no "pm" or "am"
-            if ampm:
-                result_list.append(self.cardinal.convert(self.modulo_hour(hour)))
-            else:
-                result_list.append(self.cardinal.convert(hour))
+            result_list.append(self.cardinal.convert(hour))
             result_list += [c for c in suffix.lower() if c not in (" ", ".")]
             return " ".join(result_list)
 
         return token
 
     def modulo_hour(self, hour: str) -> str:
+        # This function is not used in the Indonesian localization but kept for compatibility.
         # "12pm" -> "twelve p m", while "1pm" -> "one p m"
         if hour == "12":
             return hour

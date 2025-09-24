@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 from nltk.tokenize import TweetTokenizer
@@ -31,24 +32,26 @@ months = ['jan',
  'feb',
  'mar',
  'apr',
+ 'mei',
  'jun',
  'jul',
- 'aug',
+ 'agu',
  'sep',
- 'oct',
+ 'okt',
  'nov',
- 'dec',
- 'january',
- 'february',
- 'march',
+ 'des',
+ 'januari',
+ 'februari',
+ 'maret',
  'april',
- 'june',
- 'july',
- 'august',
+ 'mei',
+ 'juni',
+ 'juli',
+ 'agustus',
  'september',
- 'october',
+ 'oktober',
  'november',
- 'december']
+ 'desember']
 
 labels = {
     "PLAIN": Plain(),

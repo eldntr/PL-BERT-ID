@@ -39,28 +39,28 @@ class Verbatim:
         # Translation dict from some single characters to text
         self.trans_dict = {
             # Words
-            "feet": "feet",
+            "feet": "kaki",
 
             # Characters
-            "&": "and",
-            "_": "underscore",
-            "#": "number",
+            "&": "dan",
+            "_": "garis bawah",
+            "#": "tagar",
             "€": "euro",
-            "$": "dollar",
+            "$": "dolar",
             "£": "pound",
             "~": "tilde",
-            "%": "percent",
+            "%": "persen",
 
             # Math related
-            "²": "squared",
-            "³": "cubed",
-            "×": "times",
-            "=": "equals",
-            ">": "greater than",
+            "²": "kuadrat",
+            "³": "kubik",
+            "×": "kali",
+            "=": "sama dengan",
+            ">": "lebih besar dari",
 
             # Greek
-            "α": "alpha",
-            "Α": "alpha",
+            "α": "alfa",
+            "Α": "alfa",
             "β": "beta",
             "Β": "beta",
             "γ": "gamma",
@@ -87,8 +87,8 @@ class Verbatim:
             "Ν": "nu",
             "ξ": "xi",
             "Ξ": "xi",
-            "ο": "omicron",
-            "Ο": "omicron",
+            "ο": "omikron",
+            "Ο": "omikron",
             "π": "pi",
             "Π": "pi",
             "ρ": "rho",
@@ -112,26 +112,26 @@ class Verbatim:
             "Ω": "omega",
 
             # Measurement
-            "µ": "micro"
+            "µ": "mikro"
         }
 
         # Translation dict for converting numbers to the desired format, 
         # without having to use the Cardinal conversion.
-        # Includes . -> "dot" for convenience.
+        # Includes . -> "titik" for convenience.
         self.trans_ordinal_dict = {
-            ".": "dot",
-            "-": "d a s h",
+            ".": "titik",
+            "-": "s t r i p",
 
-            "0": "o",
-            "1": "o n e",
-            "2": "t w o",
-            "3": "t h r e e",
-            "4": "f o u r",
-            "5": "f i v e",
-            "6": "s i x",
-            "7": "s e v e n",
-            "8": "e i g h t",
-            "9": "n i n e"
+            "0": "n o l",
+            "1": "s a t u",
+            "2": "d u a",
+            "3": "t i g a",
+            "4": "e m p a t",
+            "5": "l i m a",
+            "6": "e n a m",
+            "7": "t u j u h",
+            "8": "d e l a p a n",
+            "9": "s e m b i l a n"
         }
 
     def convert(self, token: str) -> str:

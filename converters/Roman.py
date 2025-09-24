@@ -1,4 +1,5 @@
 
+from typing import Tuple
 from singleton_decorator import singleton
 
 import re
@@ -36,7 +37,7 @@ class Roman:
             "M": 1000
         }
 
-    def convert(self, token: str) -> (str, str):
+    def convert(self, token: str) -> Tuple[str, str]:
         # 1 Split the token in sections and work with the largest one, in case the input is "I II"
         token = max(token.split(" "), key=len)
 
@@ -62,4 +63,4 @@ class Roman:
     
     def check_if_roman(self, token: str) -> bool:
         # Check whether the largest section of the token is deemed a roman numeral
-        return self.roman_filter_regex.fullmatch(max(token.split(" "), key=len)) != None
+        return self.roman_filter_regex.fullmatch(max(token.split(" "), key=len)) != None if token else False

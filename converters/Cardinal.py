@@ -2,6 +2,7 @@
 from singleton_decorator import singleton
 
 import re
+from typing import Generator
 
 from .Roman import Roman
 
@@ -51,70 +52,70 @@ class Cardinal:
 
         # List of suffixes
         self.scale_suffixes = [
-            "thousand", 
-            "million", 
-            "billion", 
-            "trillion", 
-            "quadrillion", 
-            "quintillion", 
-            "sextillion", 
-            "septillion", 
-            "octillion", 
-            "undecillion", 
-            "tredecillion", 
-            "quattuordecillion", 
-            "quindecillion", 
-            "sexdecillion", 
-            "septendecillion", 
-            "octodecillion", 
-            "novemdecillion", 
-            "vigintillion"
+            "ribu", 
+            "juta", 
+            "miliar", 
+            "triliun", 
+            "kuadriliun", 
+            "kuintiliun", 
+            "sekstiliun", 
+            "septiliun", 
+            "oktiliun", 
+            "undesiliun", 
+            "tredesiliun", 
+            "kuatuordesiliun", 
+            "kuindesiliun", 
+            "seksdesiliun", 
+            "septendesiliun", 
+            "oktodesiliun", 
+            "novemdesiliun", 
+            "vigintiliun"
         ]
 
         # Translation dict for small numbers
         # We intentionally ignore 0 as we use it as a special case instead.
         self.small_trans_dict = {
-            "1": "one",
-            "2": "two",
-            "3": "three",
-            "4": "four",
-            "5": "five",
-            "6": "six",
-            "7": "seven",
-            "8": "eight",
-            "9": "nine",
+            "1": "satu",
+            "2": "dua",
+            "3": "tiga",
+            "4": "empat",
+            "5": "lima",
+            "6": "enam",
+            "7": "tujuh",
+            "8": "delapan",
+            "9": "sembilan",
         }
 
         # Translation dict for multiples of tens
         self.tens_trans_dict = {
-            "1": "ten",
-            "2": "twenty",
-            "3": "thirty",
-            "4": "forty",
-            "5": "fifty",
-            "6": "sixty",
-            "7": "seventy",
-            "8": "eighty",
-            "9": "ninety",
+            "1": "sepuluh",
+            "2": "dua puluh",
+            "3": "tiga puluh",
+            "4": "empat puluh",
+            "5": "lima puluh",
+            "6": "enam puluh",
+            "7": "tujuh puluh",
+            "8": "delapan puluh",
+            "9": "sembilan puluh",
         }
 
         # Translation dict for special cases
         self.special_trans_dict = {
-            11: "eleven",
-            12: "twelve",
-            13: "thirteen",
-            14: "fourteen",
-            15: "fifteen",
-            16: "sixteen",
-            17: "seventeen",
-            18: "eighteen",
-            19: "nineteen"
+            11: "sebelas",
+            12: "dua belas",
+            13: "tiga belas",
+            14: "empat belas",
+            15: "lima belas",
+            16: "enam belas",
+            17: "tujuh belas",
+            18: "delapan belas",
+            19: "sembilan belas"
         }
 
         # Roman conversion
         self.roman = Roman()
 
-    def _give_chunk(self, num_str: str, size:int = 3) -> str:
+    def _give_chunk(self, num_str: str, size:int = 3) -> Generator[str, None, None]:
         # While string not empty
         while num_str:
             # yield `size` last elements

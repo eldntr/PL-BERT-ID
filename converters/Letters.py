@@ -36,7 +36,7 @@ class Letters:
         self.verbatim = Verbatim()
         # Translation dict to convert accented characters properly
         self.trans_dict = {
-            "é": "e acute",
+            "é": "e aksen",
         }
     
     def convert(self, token: str) -> str:
@@ -78,7 +78,7 @@ class Letters:
             suffix = False
 
         # 6 Result a string padded version of the list, while ignoring "'"
-        return " ".join([self.convert_char(char) for char in token if char != "'"]) + ("'s" if suffix else "")
+        return " ".join([self.convert_char(char) for char in token if char != "'"]) + ("" if suffix else "")
 
     def convert_char(self, char: str) -> str:
         # If the character exists in the translation dict

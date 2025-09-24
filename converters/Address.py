@@ -24,14 +24,18 @@ class Address:
         # Regex to filter out spaces, dots and dashes
         self.filter_regex = re.compile(r"[. -]")
         # Regex to detect address
-        self.address_regex = re.compile(r"((?P<upper_prefix>[A-Z\.]*)|(?P<lower_prefix>[a-zA-Z]*))(?P<link>( |-)*)(?P<number>\d+)(?P<suffix>N|E|S|W|n|e|s|w)?")
+        self.address_regex = re.compile(r"((?P<upper_prefix>[A-Z\.]*)|(?P<lower_prefix>[a-zA-Z]*|No\.|Nomor))(?P<link>( |-)*)(?P<number>\d+)(?P<suffix>U|T|S|B|utara|timur|selatan|barat)?", re.IGNORECASE)
 
         # Translation dict for converting directions
         self.direction_trans_dict = {
-            "n": "north",
-            "e": "east",
-            "s": "south",
-            "w": "west",
+            "u": "utara",
+            "t": "timur",
+            "s": "selatan",
+            "b": "barat",
+            "utara": "utara",
+            "timur": "timur",
+            "selatan": "selatan",
+            "barat": "barat",
         }
 
         # Cardinal and Digit conversion
@@ -64,7 +68,7 @@ class Address:
                 if number[-3:-2]:
                     result_list.append(self.digit.convert(number[-3:-2]))
                 if number[-2:-1] == "0":
-                    result_list.append("o")
+                    result_list.append("nol")
                     result_list.append(self.digit.convert(number[-1]))
                 else:
                     result_list.append(self.cardinal.convert(number[-2:]))

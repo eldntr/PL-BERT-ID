@@ -29,8 +29,9 @@ class Plain:
         super().__init__()
         # Translation dict for uppercase, full messages
         self.upper_trans_dict = {
-            "DR": "drive", # Also often "Doctor"
-            "ST": "street"
+            "DR": "dokter", 
+            "ST": "santo",
+            "JL": "jalan"
         }
 
         # Translation dict for converting full messages
@@ -38,14 +39,14 @@ class Plain:
         }
 
         # Get data from plain.json file with common UK -> US text conversion
-        with open(os.path.join(os.path.dirname(__file__), "plain.json")) as f:
-            import json
-            self.trans_dict = {**self.trans_dict, **json.load(f)}
+        # with open(os.path.join(os.path.dirname(__file__), "plain.json")) as f:
+        #     import json
+        #     self.trans_dict = {**self.trans_dict, **json.load(f)}
 
         # List of items to split at
         self.split_at = [
-            "strasse",
-            "weg",
+            "jalan",
+            "gang",
         ]
 
         # Regex to detect where to split

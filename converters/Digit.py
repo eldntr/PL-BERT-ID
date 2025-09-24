@@ -22,16 +22,16 @@ class Digit:
         self.filter_regex = re.compile("[^0-9]")
         # Translation dict to convert digits to text
         self.trans_dict = {
-            "0": "o",
-            "1": "one",
-            "2": "two",
-            "3": "three",
-            "4": "four",
-            "5": "five",
-            "6": "six",
-            "7": "seven",
-            "8": "eight",
-            "9": "nine"
+            "0": "nol",
+            "1": "satu",
+            "2": "dua",
+            "3": "tiga",
+            "4": "empat",
+            "5": "lima",
+            "6": "enam",
+            "7": "tujuh",
+            "8": "delapan",
+            "9": "sembilan"
         }
 
     def convert(self, token: str) -> str:
@@ -39,7 +39,7 @@ class Digit:
         token = self.filter_regex.sub("", token)
         # 2 Check for special case
         if token == "007":
-            return "double o seven"
+            return "nol nol tujuh"
         # 3 & 4 Convert each digit to text and space out the text
         token = " ".join([self.trans_dict[c] for c in token])
         return token

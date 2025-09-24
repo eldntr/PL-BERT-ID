@@ -26,35 +26,35 @@ class Decimal:
     """
     def __init__(self):
         super().__init__()
-        # Regex to detect input of the sort "x.y" or ".y"
-        self.decimal_regex = re.compile(r"(-?\d*)\.(\d+)(.*)")
+        # Regex to detect input of the sort "x,y" or ",y"
+        self.decimal_regex = re.compile(r"(-?\d*),(\d+)(.*)")
         # Regex to detect a number
         self.number_regex = re.compile(r"(-?\d+)(.*)")
-        # Regex filter to remove commas
-        self.filter_regex = re.compile(r"[,]")
+        # Regex filter to remove dots
+        self.filter_regex = re.compile(r"[.]")
         # Digit and Cardinal conversion
         self.cardinal = Cardinal()
         self.digit = Digit()
         # List of potential suffixes
         self.suffixes = [
-            "thousand", 
-            "million", 
-            "billion", 
-            "trillion", 
-            "quadrillion", 
-            "quintillion", 
-            "sextillion", 
-            "septillion", 
-            "octillion", 
-            "undecillion", 
-            "tredecillion", 
-            "quattuordecillion", 
-            "quindecillion", 
-            "sexdecillion", 
-            "septendecillion", 
-            "octodecillion", 
-            "novemdecillion", 
-            "vigintillion"
+            "ribu", 
+            "juta", 
+            "miliar", 
+            "triliun", 
+            "kuadriliun", 
+            "kuintiliun", 
+            "sekstiliun", 
+            "septiliun", 
+            "oktiliun", 
+            "undesiliun", 
+            "tredesiliun", 
+            "kuatuordesiliun", 
+            "kuindesiliun", 
+            "seksdesiliun", 
+            "septendesiliun", 
+            "oktodesiliun", 
+            "novemdesiliun", 
+            "vigintiliun"
         ]
         # Regular expression to detect the suffixes
         self.suffix_regex = re.compile(f" *({'|'.join(self.suffixes)})")
@@ -96,16 +96,16 @@ class Decimal:
             match = self.e_suffix_regex.match(token)
             if match:
                 # Turn the suffix into "times ten to the y"
-                suffix = f"times ten to the {self.cardinal.convert(match.group(1))}"
+                suffix = f"kali sepuluh pangkat {self.cardinal.convert(match.group(1))}"
 
         # Make list for output
         result_list = []
         # 6, 7 Only if the decimal is 0, and there is a number in front of the dot, and there is no suffix
         # then we use "zero" instead of "o".
         if len(decimal) > 0:
-            result_list.append("point")
+            result_list.append("koma")
             if decimal == "0" and len(number) > 0 and len(suffix) == 0:
-                result_list.append("zero")
+                result_list.append("nol")
             else:
                 # 8 Otherwise use Digit conversion
                 result_list.append(self.digit.convert(decimal))

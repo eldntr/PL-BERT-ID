@@ -28,21 +28,21 @@ class Telephone:
         super().__init__()
         # Translation dict
         self.trans_dict = {
-            " ": "sil",
-            "-": "sil",
+            " ": "jeda",
+            "-": "jeda",
 
-            "x": "extension",
+            "x": "sambungan",
 
-            "0": "o",
-            "1": "one",
-            "2": "two",
-            "3": "three",
-            "4": "four",
-            "5": "five",
-            "6": "six",
-            "7": "seven",
-            "8": "eight",
-            "9": "nine",
+            "0": "nol",
+            "1": "satu",
+            "2": "dua",
+            "3": "tiga",
+            "4": "empat",
+            "5": "lima",
+            "6": "enam",
+            "7": "tujuh",
+            "8": "delapan",
+            "9": "sembilan",
         }
         # Regex to filter out parentheses
         self.filter_regex = re.compile(r"[()]")
@@ -54,19 +54,44 @@ class Telephone:
         # 2 Convert list of characters
         result_list = [self.trans_dict[c] if c in self.trans_dict else c for c in token]
 
-        # 3 Remove multiple "sil"'s in a row. Also remove "sil" at the start.
-        result_list = [section for i, section in enumerate(result_list) if section != "sil" or (i - 1 >= 0 and result_list[i - 1] != "sil")]
+        # 3 Remove multiple "jeda"'s in a row. Also remove "jeda" at the start.
+        result_list = [section for i, section in enumerate(result_list) if section != "jeda" or (i - 1 >= 0 and result_list[i - 1] != "jeda")]
 
         # 4 Iterate over result_list and replace multiple "o"s in a row with "hundred" or "thousand", 
-        # but only if preceded with something other than "o" or "sil", and if succeeded with "sil" or the end of the list.
+        # but only if preceded with something other than "o" or "jeda", and if succeeded with "jeda" or the end of the list.
         i = 0
         while i < len(result_list):
             offset = 0
-            while i + offset < len(result_list) and result_list[i + offset] == "o":
+            while i + offset < len(result_list) and result_list[i + offset] == "nol":
                 offset += 1
 
-            if (i + offset >= len(result_list) or result_list[i + offset] == "sil") and (i - 1 < 0 or result_list[i - 1] not in ("o", "sil")) and offset in (2, 3):
-                result_list[i : offset + i] = ["hundred"] if offset == 2 else ["thousand"]
+            if (i + offset >= len(result_list) or result_list[i + offset] == "jeda") and (i - 1 < 0 or result_list[i - 1] not in ("nol", "jeda")) and offset in (2, 3):
+                result_list[i : offset + i] = ["ratus"] if offset == 2 else ["ribu"]
+
+            i += 1
+
+        return " ".join(result_list)
+
+    def convert(self, token: str) -> str:
+        # 1 Convert to lowercase and replace parentheses with dashes
+        token = self.filter_regex.sub("-", token.lower())
+
+        # 2 Convert list of characters
+        result_list = [self.trans_dict[c] if c in self.trans_dict else c for c in token]
+
+        # 3 Remove multiple "jeda"'s in a row. Also remove "jeda" at the start.
+        result_list = [section for i, section in enumerate(result_list) if section != "jeda" or (i - 1 >= 0 and result_list[i - 1] != "jeda")]
+
+        # 4 Iterate over result_list and replace multiple "o"s in a row with "hundred" or "thousand", 
+        # but only if preceded with something other than "o" or "jeda", and if succeeded with "jeda" or the end of the list.
+        i = 0
+        while i < len(result_list):
+            offset = 0
+            while i + offset < len(result_list) and result_list[i + offset] == "nol":
+                offset += 1
+
+            if (i + offset >= len(result_list) or result_list[i + offset] == "jeda") and (i - 1 < 0 or result_list[i - 1] not in ("nol", "jeda")) and offset in (2, 3):
+                result_list[i : offset + i] = ["ratus"] if offset == 2 else ["ribu"]
 
             i += 1
 

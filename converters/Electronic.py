@@ -37,67 +37,67 @@ class Electronic:
         super().__init__()
         # Translation dict for URL sections
         self.data_https_dict = {
-            "/": "slash",
-            ":": "colon",
-            ".": "dot",
-            "#": "hash",
-            "-": "dash",
+            "/": "garis miring",
+            ":": "titik dua",
+            ".": "titik",
+            "#": "tagar",
+            "-": "strip",
 
             "é": "e a c u t e",
             
             # Somehow these should be said like this, according to the data
-            "(": "o p e n i n g p a r e n t h e s i s",
-            ")": "c l o s i n g p a r e n t h e s i s",
-            "_": "u n d e r s c o r e",
-            ",": "c o m m a",
-            "%": "p e r c e n t",
-            "~": "t i l d e",
-            ";": "s e m i colon",
-            "'": "s i n g l e q u o t e",
-            "\"": "d o u b l e q u o t e",
+            "(": "kurung buka",
+            ")": "kurung tutup",
+            "_": "garis bawah",
+            ",": "koma",
+            "%": "persen",
+            "~": "tilde",
+            ";": "titik koma",
+            "'": "kutip tunggal",
+            "\"": "kutip ganda",
 
-            "0": "o",
-            "1": "o n e",
-            "2": "t w o",
-            "3": "t h r e e",
-            "4": "f o u r",
-            "5": "f i v e",
-            "6": "s i x",
-            "7": "s e v e n",
-            "8": "e i g h t",
-            "9": "n i n e",
+            "0": "nol",
+            "1": "satu",
+            "2": "dua",
+            "3": "tiga",
+            "4": "empat",
+            "5": "lima",
+            "6": "enam",
+            "7": "tujuh",
+            "8": "delapan",
+            "9": "sembilan",
         }
 
         # Translation dict for urls without http(s) at the start
         self.data_no_https_dict = {
-            "/": "s l a s h",
-            ":": "c o l o n",
-            ".": "dot",
-            "#": "h a s h",
-            "-": "d a s h",
+            "/": "garis miring",
+            ":": "titik dua",
+            ".": "titik",
+            "#": "tagar",
+            "-": "strip",
 
             "é": "e a c u t e",
             
-            "(": "o p e n i n g p a r e n t h e s i s",
-            ")": "c l o s i n g p a r e n t h e s i s",
-            "_": "u n d e r s c o r e",
-            ",": "c o m m a",
-            "%": "p e r c e n t",
-            "~": "t i l d e",
-            ";": "s e m i c o l o n",
-            "'": "s i n g l e q u o t e",
-            "\"": "d o u b l e q u o t e",
+            "(": "kurung buka",
+            ")": "kurung tutup",
+            "_": "garis bawah",
+            ",": "koma",
+            "%": "persen",
+            "~": "tilde",
+            ";": "titik koma",
+            "'": "kutip tunggal",
+            "\"": "kutip ganda",
             
-            "0": "o",
-            "1": "o n e",
-            "2": "t w o",
-            "3": "t h r e e",
-            "4": "f o u r",
-            "5": "f i v e",
-            "6": "s i x",
-            "7": "s e v e n",
-            "8": "e i g h t",
-            "9": "n i n e",
+            "0": "nol",
+            "1": "satu",
+            "2": "dua",
+            "3": "tiga",
+            "4": "empat",
+            "5": "lima",
+            "6": "enam",
+            "7": "tujuh",
+            "8": "delapan",
+            "9": "sembilan",
         }
 
         # Regex to test for "https?://"
@@ -105,32 +105,32 @@ class Electronic:
         
         # Translation dict for sensible conversion
         self.sensible_trans_dict = {
-            "/": "slash",
-            ":": "colon",
-            ".": "dot",
-            "#": "hash",
-            "-": "dash",
-            "é": "e acute",
-            "(": "opening parenthesis",
-            ")": "closing parenthesis",
-            "_": "underscore",
-            ",": "comma",
-            "%": "percent",
+            "/": "garis miring",
+            ":": "titik dua",
+            ".": "titik",
+            "#": "tagar",
+            "-": "strip",
+            "é": "e aksen",
+            "(": "kurung buka",
+            ")": "kurung tutup",
+            "_": "garis bawah",
+            ",": "koma",
+            "%": "persen",
             "~": "tilde",
-            ";": "semicolon",
-            "'": "single quote",
-            "\"": "double quote",
+            ";": "titik koma",
+            "'": "kutip tunggal",
+            "\"": "kutip ganda",
 
-            "0": "zero",
-            "1": "one",
-            "2": "two",
-            "3": "three",
-            "4": "four",
-            "5": "five",
-            "6": "six",
-            "7": "seven",
-            "8": "eight",
-            "9": "nine",
+            "0": "nol",
+            "1": "satu",
+            "2": "dua",
+            "3": "tiga",
+            "4": "empat",
+            "5": "lima",
+            "6": "enam",
+            "7": "tujuh",
+            "8": "delapan",
+            "9": "sembilan",
         }
 
         # Cardinal and digit conversion
@@ -163,7 +163,7 @@ class Electronic:
             if http:
                 # 4.1 If .com, add "dot com"
                 if token[c_index:].startswith(".com"):
-                    result_list.append("dot com")
+                    result_list.append("titik com")
                     c_index += len(".com")
                     continue
             
@@ -227,7 +227,7 @@ class Electronic:
     
     def convert_hash_tag(self, token: str) -> str:
         # Parse the hash tag message
-        out = "hash tag "
+        out = "tagar "
         for char in token[1:].lower():
             if char in self.sensible_trans_dict:
                 if out[-1] == " ":

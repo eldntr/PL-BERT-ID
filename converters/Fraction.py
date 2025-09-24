@@ -45,94 +45,94 @@ class Fraction:
         # Translation dict for special cases
         self.trans_dict = {
             "½": {
-                "prepended": "a",
-                "single": "one",
-                "text": "half"
+                "prepended": "",
+                "single": "setengah",
+                "text": ""
                 },
             "⅓": {
-                "prepended": "a",
-                "single": "one",
-                "text": "third"
+                "prepended": "se",
+                "single": "satu",
+                "text": "pertiga"
                 },
             "⅔": {
-                "prepended": "two",
-                "single": "two",
-                "text": "thirds"
+                "prepended": "dua",
+                "single": "dua",
+                "text": "pertiga"
                 },
             "¼": {
-                "prepended": "a",
-                "single": "one",
-                "text": "quarter"
+                "prepended": "se",
+                "single": "satu",
+                "text": "perempat"
                 },
             "¾": {
-                "prepended": "three",
-                "single": "three",
-                "text": "quarters"
+                "prepended": "tiga",
+                "single": "tiga",
+                "text": "perempat"
                 },
             "⅕": {
-                "prepended": "a",
-                "single": "one",
-                "text": "fifth"
+                "prepended": "se",
+                "single": "satu",
+                "text": "perlima"
                 },
             "⅖": {
-                "prepended": "two",
-                "single": "two",
-                "text": "fifths"
+                "prepended": "dua",
+                "single": "dua",
+                "text": "perlima"
                 },
             "⅗": {
-                "prepended": "three",
-                "single": "three",
-                "text": "fifths"
+                "prepended": "tiga",
+                "single": "tiga",
+                "text": "perlima"
                 },
             "⅘": {
-                "prepended": "four",
-                "single": "four",
-                "text": "fifths"
+                "prepended": "empat",
+                "single": "empat",
+                "text": "perlima"
                 },
             "⅙": {
-                "prepended": "a",
-                "single": "one",
-                "text": "sixth"
+                "prepended": "se",
+                "single": "satu",
+                "text": "perenam"
                 },
             "⅚": {
-                "prepended": "five",
-                "single": "five",
-                "text": "sixths"
+                "prepended": "lima",
+                "single": "lima",
+                "text": "perenam"
                 },
             "⅐": {
-                "prepended": "a",
-                "single": "one",
-                "text": "sixth"
+                "prepended": "se",
+                "single": "satu",
+                "text": "pertujuh"
                 },
             "⅛": {
-                "prepended": "an",
-                "single": "one",
-                "text": "eighth"
+                "prepended": "se",
+                "single": "satu",
+                "text": "perdelapan"
                 },
             "⅜": {
-                "prepended": "three",
-                "single": "three",
-                "text": "eighths"
+                "prepended": "tiga",
+                "single": "tiga",
+                "text": "perdelapan"
                 },
             "⅝": {
-                "prepended": "five",
-                "single": "five",
-                "text": "eighths"
+                "prepended": "lima",
+                "single": "lima",
+                "text": "perdelapan"
                 },
             "⅞": {
-                "prepended": "seven",
-                "single": "seven",
-                "text": "eighths"
+                "prepended": "tujuh",
+                "single": "tujuh",
+                "text": "perdelapan"
                 },
             "⅑": {
-                "prepended": "a",
-                "single": "one",
-                "text": "ninth"
+                "prepended": "se",
+                "single": "satu",
+                "text": "persembilan"
                 },
             "⅒": {
-                "prepended": "a",
-                "single": "one",
-                "text": "tenth"
+                "prepended": "se",
+                "single": "satu",
+                "text": "persepuluh"
                 }
         }
         # Regex to check for special case
@@ -146,71 +146,71 @@ class Fraction:
 
         # Translation from Cardinal style to Ordinal style
         self.trans_denominator = {
-            "zero": "zeroth",
-            "one": "first",
-            "two": "second",
-            "three": "third",
-            "four": "fourth",
-            "five": "fifth",
-            "six": "sixth",
-            "seven": "seventh",
-            "eight": "eighth",
-            "nine": "ninth",
+            "nol": "nol",
+            "satu": "satu",
+            "dua": "dua",
+            "tiga": "tiga",
+            "empat": "empat",
+            "lima": "lima",
+            "enam": "enam",
+            "tujuh": "tujuh",
+            "delapan": "delapan",
+            "sembilan": "sembilan",
 
-            "ten": "tenth",
-            "twenty": "twentieth",
-            "thirty": "thirtieth",
-            "forty": "fortieth",
-            "fifty": "fiftieth",
-            "sixty": "sixtieth",
-            "seventy": "seventieth",
-            "eighty": "eightieth",
-            "ninety": "ninetieth",
+            "sepuluh": "sepuluh",
+            "dua puluh": "dua puluh",
+            "tiga puluh": "tiga puluh",
+            "empat puluh": "empat puluh",
+            "lima puluh": "lima puluh",
+            "enam puluh": "enam puluh",
+            "tujuh puluh": "tujuh puluh",
+            "delapan puluh": "delapan puluh",
+            "sembilan puluh": "sembilan puluh",
 
-            "eleven": "eleventh",
-            "twelve": "twelfth",
-            "thirteen": "thirteenth",
-            "fourteen": "fourteenth",
-            "fifteen": "fifteenth",
-            "sixteen": "sixteenth",
-            "seventeen": "seventeenth",
-            "eighteen": "eighteenth",
-            "nineteen": "nineteenth",
+            "sebelas": "sebelas",
+            "dua belas": "dua belas",
+            "tiga belas": "tiga belas",
+            "empat belas": "empat belas",
+            "lima belas": "lima belas",
+            "enam belas": "enam belas",
+            "tujuh belas": "tujuh belas",
+            "delapan belas": "delapan belas",
+            "sembilan belas": "sembilan belas",
 
-            "hundred": "hundredth",
-            "thousand": "thousandth",
-            "million": "millionth",
-            "billion": "billionth",
-            "trillion": "trillionth",
-            "quadrillion": "quadrillionth",
-            "quintillion": "quintillionth",
-            "sextillion": "sextillionth",
-            "septillion": "septillionth",
-            "octillion": "octillionth",
-            "undecillion": "undecillionth",
-            "tredecillion": "tredecillionth",
-            "quattuordecillion": "quattuordecillionth",
-            "quindecillion": "quindecillionth",
-            "sexdecillion": "sexdecillionth",
-            "septendecillion": "septendecillionth",
-            "octodecillion": "octodecillionth",
-            "novemdecillion": "novemdecillionth",
-            "vigintillion": "vigintillionth"
+            "ratus": "ratus",
+            "ribu": "ribu",
+            "juta": "juta",
+            "miliar": "miliar",
+            "triliun": "triliun",
+            "kuadriliun": "kuadriliun",
+            "kuintiliun": "kuintiliun",
+            "sekstiliun": "sekstiliun",
+            "septiliun": "septiliun",
+            "oktiliun": "oktiliun",
+            "undesiliun": "undesiliun",
+            "tredesiliun": "tredesiliun",
+            "kuatuordesiliun": "kuatuordesiliun",
+            "kuindesiliun": "kuindesiliun",
+            "seksdesiliun": "seksdesiliun",
+            "septendesiliun": "septendesiliun",
+            "oktodesiliun": "oktodesiliun",
+            "novemdesiliun": "novemdesiliun",
+            "vigintiliun": "vigintiliun"
         }
 
         # Translation dict for edge cases
         self.edge_dict = {
             "1": {
-                "singular": "over one",
-                "plural": "over one"
+                "singular": "per satu",
+                "plural": "per satu"
                 },
             "2": {
-                "singular": "half",
-                "plural": "halves"
+                "singular": "setengah",
+                "plural": "setengah"
                 },
             "4":{
-                "singular": "quarter",
-                "plural": "quarters"
+                "singular": "seperempat",
+                "plural": "perempat"
                 }
         }
 
@@ -229,7 +229,7 @@ class Fraction:
             # 5 If it does, convert it using the Cardinal convertion: "1202" -> "one thousand two hundred two"
             if remainder:
                 prefix = self.cardinal.convert(remainder)
-                result = f"{prefix} and {frac_dict['prepended']} {frac_dict['text']}"
+                result = f"{prefix} {frac_dict['prepended']} {frac_dict['text']}"
             else:
                 result = f"{frac_dict['single']} {frac_dict['text']}"
         
@@ -261,9 +261,9 @@ class Fraction:
                     # Potentially add "s" if the numerator is larger than 1.
                     # eg ninth -> ninths 
                     if abs(int(numerator)) != 1:
-                        denominator_text_list[-1] += "s"
+                        denominator_text_list[-1] += ""
                     denominator_text = " ".join(denominator_text_list)
-                    result = f"{numerator_text} {denominator_text}"
+                    result = f"{numerator_text} per {denominator_text}"
                 
                 # 12 Get remaining values
                 remainder = self.slash_regex.sub("", token)
@@ -272,10 +272,10 @@ class Fraction:
                     remainder_text = self.cardinal.convert(remainder)
                     # Potentially transform "one" to "a" if possible
                     result_list = result.split()
-                    if result_list[0] == "one":
-                        result_list[0] = "a"
+                    if result_list[0] == "satu":
+                        result_list[0] = "se"
                     # Prepend the remaining values in cardinal style
-                    result = f"{remainder_text} and {' '.join(result_list)}"
+                    result = f"{remainder_text} {' '.join(result_list)}"
             
             else:
                 # Unhandled case. Should not occur if token really is of the FRACTION class

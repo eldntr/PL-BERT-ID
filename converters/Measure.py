@@ -1,4 +1,3 @@
-
 from singleton_decorator import singleton
 
 import re
@@ -62,7 +61,7 @@ class Measure:
         # Regex to detect whether "of a" should be used. Matches only when "of a" should NOT be used
         self.of_a_regex = re.compile(r"(-?\d+ -?\d+ *\/ *-? *\d+)|(-?\d+ *(?:½|⅓|⅔|¼|¾|⅕|⅖|⅗|⅘|⅙|⅚|⅐|⅛|⅜|⅝|⅞|⅑|⅒))")
         # Regex to detect input to pass to digit convertor, including potential million/billion suffix
-        self.value_regex = re.compile(r"(-?(?: |\d)*\.?\d+ *(?:thousand|million|billion|trillion|quadrillion|quintillion|sextillion|septillion|octillion|undecillion|tredecillion|quattuordecillion|quindecillion|sexdecillion|septendecillion|octodecillion|novemdecillion|vigintillion)?)")
+        self.value_regex = re.compile(r"(-?(?: |\d)*\.?\d+ *(?:ribu|juta|miliar|triliun|kuadriliun|kuintiliun|sekstiliun|septiliun|oktiliun|undesiliun|tredesiliun|kuatuordesiliun|kuindesiliun|seksdesiliun|septendesiliun|oktodesiliun|novemdesiliun|vigintiliun)?)")
         # Regex filter to remove commas
         self.filter_regex = re.compile(r"[,]")
         # Regex filter to remove spaces
@@ -211,251 +210,199 @@ class Measure:
 
         # Translation dict for non-prefixed measure types
         # Also overrides values from self.prefixed_dict, like "mb" -> "millibyte"
-        self.custom_dict = {
-            "%": {
-                "singular": "percent",
-                "plural": "percent"
+        self.trans_dict = {
+            "mm": {
+                "singular": "milimeter",
+                "plural": "milimeter"
             },
-            "pc": {
-                "singular": "percent",
-                "plural": "percent"
+            "cm": {
+                "singular": "sentimeter",
+                "plural": "sentimeter"
             },
-            "ft": {
-                "singular": "foot",
-                "plural": "feet"
+            "m": {
+                "singular": "meter",
+                "plural": "meter"
             },
-            "mi": {
-                "singular": "mile",
-                "plural": "miles"
-            },
-            "mb": {
-                "singular": "megabyte",
-                "plural": "megabytes"
-            },
-            "ha": {
-                "singular": "hectare",
-                "plural": "hectares"
-            },
-            "\"": {
-                "singular": "inch",
-                "plural": "inches"
-            },
-            "in": {
-                "singular": "inch",
-                "plural": "inches"
-            },
-            "\'": {
-                "singular": "foot",
-                "plural": "feet"
-            },
-            "rpm": {
-                "singular": "revolution per minute",
-                "plural": "revolutions per minute" # on "per x", x is always singular
-            },
-            "hp": {
-                "singular": "horsepower",
-                "plural": "horsepower"
-            },
-            "cc": {
-                "singular": "c c",
-                "plural": "c c"
-            },
-            "oz": {
-                "singular": "ounce",
-                "plural": "ounces",
-            },
-            "mph": {
-                "singular": "mile per hour",
-                "plural": "miles per hour"
-            },
-            "lb": {
-                "singular": "pound",
-                "plural": "pounds"
-            },
-            "lbs": {
-                "singular": "pounds", # Always plural due to how "lbs" itself is already plural
-                "plural": "pounds"
-            },
-            "kt": {
-                "singular": "knot",
-                "plural": "knots"
-            },
-            "dB": {
-                "singular": "decibel",
-                "plural": "decibels"
-            },
-            "AU": {
-                "singular": "astronomical unit",
-                "plural": "astronomical units"
-            },
-            "st": {
-                "singular": "stone",
-                "plural": "stone" # Stone is always singular, eg "nine stone"
-            },
-            "yd": {
-                "singular": "yard",
-                "plural": "yards"
-            },
-            "yr": {
-                "singular": "year",
-                "plural": "years"
-            },
-            "yrs": {
-                "singular": "year", #TODO Consider years as "yrs" is already plural
-                "plural": "years"
-            },
-            "eV": {
-                "singular": "electron volt",
-                "plural": "electron volts"
-            },
-            "/": {
-                "singular": "per",
-                "plural": "per"
+            "km": {
+                "singular": "kilometer",
+                "plural": "kilometer"
             },
             "sq": {
-                "singular": "square",
-                "plural": "square"
+                "singular": "persegi",
+                "plural": "persegi"
             },
-            "2": {
-                "singular": "square",
-                "plural": "square"
+            "mg": {
+                "singular": "miligram",
+                "plural": "miligram"
             },
-            "²": {
-                "singular": "square",
-                "plural": "square"
+            "g": {
+                "singular": "gram",
+                "plural": "gram"
             },
-            "3": {
-                "singular": "cubic",
-                "plural": "cubic"
+            "kg": {
+                "singular": "kilogram",
+                "plural": "kilogram"
             },
-            "³": {
-                "singular": "cubic",
-                "plural": "cubic"
+            "ml": {
+                "singular": "mililiter",
+                "plural": "mililiter"
             },
-            "h": {
-                "singular": "hour",
-                "plural": "hours"
+            "l": {
+                "singular": "liter",
+                "plural": "liter"
             },
-            "hr": {
-                "singular": "hour",
-                "plural": "hours"
-            },
-            "hrs": {
-                "singular": "hour", # TODO: Consider plural as "hrs" is already plural
-                "plural": "hours"
-            },
-            "ch": {
-                "singular": "chain",
-                "plural": "chains"
-            },
-            "KiB": {
-                "singular": "kibibyte",
-                "plural": "kibibytes"
-            },
-            "MiB": {
-                "singular": "mebibyte",
-                "plural": "mebibytes"
-            },
-            "GiB": {
-                "singular": "gibibyte",
-                "plural": "gibibytes"
-            },
-            "pH": { # The data parses "pH" as "pico henrys"
-                "singular": "p h",
-                "plural": "p h"
-            },
-            "kph": {
-                "singular": "kilometer per hour",
-                "plural": "kilometers per hour"
-            },
-            "Da": {
-                "singular": "dalton",
-                "plural": "daltons"
-            },
-            "cwt": {
-                "singular": "hundredweight",
-                "plural": "hundredweight"
-            },
-            "Sv": {
-                "singular": "sievert",
-                "plural": "sieverts",
-            },
-            "C": { # Overrides Coulomb
-                "singular": "celcius", 
-                "plural": "celcius"
-            },
-            "degrees": {
-                "singular": "degree",
-                "plural": "degrees"
-            },
-            "degree": {
-                "singular": "degree",
-                "plural": "degrees"
-            },
-            "atm": {
-                "singular": "atmosphere",
-                "plural": "atmospheres"
+            "s": {
+                "singular": "detik",
+                "plural": "detik"
             },
             "min": {
-                "singular": "minute",
-                "plural": "minutes"
+                "singular": "menit",
+                "plural": "menit"
             },
-            "cd": {
-                "singular": "candela",
-                "plural": "candelas"
+            "hr": {
+                "singular": "jam",
+                "plural": "jam"
             },
-            "ly": {
-                "singular": "light year",
-                "plural": "light years"
+            "°c": {
+                "singular": "derajat celcius",
+                "plural": "derajat celcius"
             },
-            "kts": {
-                "singular": "knot",
-                "plural": "knots"
+            "°f": {
+                "singular": "derajat fahrenheit",
+                "plural": "derajat fahrenheit"
             },
-            "mol": {
-                "singular": "mole",
-                "plural": "moles"
+            "hz": {
+                "singular": "hertz",
+                "plural": "hertz"
             },
-            "Nm": { # Overrides nanometers on the lowercase
-                "singular": "newton meter",
-                "plural": "newton meters"
+            "khz": {
+                "singular": "kilohertz",
+                "plural": "kilohertz"
+            },
+            "mhz": {
+                "singular": "megahertz",
+                "plural": "megahertz"
+            },
+            "ghz": {
+                "singular": "gigahertz",
+                "plural": "gigahertz"
+            },
+            "b": {
+                "singular": "bit",
+                "plural": "bit"
+            },
+            "kb": {
+                "singular": "kilobit",
+                "plural": "kilobit"
+            },
+            "mb": {
+                "singular": "megabit",
+                "plural": "megabit"
+            },
+            "gb": {
+                "singular": "gigabit",
+                "plural": "gigabit"
+            },
+            "tb": {
+                "singular": "terabit",
+                "plural": "terabit"
+            },
+            "B": {
+                "singular": "byte",
+                "plural": "byte"
+            },
+            "kB": {
+                "singular": "kilobyte",
+                "plural": "kilobyte"
+            },
+            "MB": {
+                "singular": "megabyte",
+                "plural": "megabyte"
+            },
+            "GB": {
+                "singular": "gigabyte",
+                "plural": "gigabyte"
+            },
+            "TB": {
+                "singular": "terabyte",
+                "plural": "terabyte"
+            },
+            "W": {
+                "singular": "watt",
+                "plural": "watt"
+            },
+            "kW": {
+                "singular": "kilowatt",
+                "plural": "kilowatt"
+            },
+            "MW": {
+                "singular": "megawatt",
+                "plural": "megawatt"
+            },
+            "GW": {
+                "singular": "gigawatt",
+                "plural": "gigawatt"
+            },
+            "V": {
+                "singular": "volt",
+                "plural": "volt"
+            },
+            "kV": {
+                "singular": "kilovolt",
+                "plural": "kilovolt"
+            },
+            "A": {
+                "singular": "ampere",
+                "plural": "ampere"
+            },
+            "mA": {
+                "singular": "miliampere",
+                "plural": "miliampere"
             },
             "Ω": {
                 "singular": "ohm",
-                "plural": "ohms"
+                "plural": "ohm"
             },
-            "bbl": {
-                "singular": "barrel",
-                "plural": "barrels"
+            "kΩ": {
+                "singular": "kilohm",
+                "plural": "kilohm"
             },
-            "gal": {
-                "singular": "gallon",
-                "plural": "gallons"
+            "MΩ": {
+                "singular": "megohm",
+                "plural": "megohm"
             },
-            "cal": { # This overides "cal" from calorie, while preserving eg "kcal". "cal" is more often used to refer to caliber than calorie I reckon, hence this entry
-                "singular": "cal",
-                "plural": "cal"
+            "J": {
+                "singular": "joule",
+                "plural": "joule"
+            },
+            "kJ": {
+                "singular": "kilojoule",
+                "plural": "kilojoule"
+            },
+            "Pa": {
+                "singular": "pascal",
+                "plural": "pascal"
+            },
+            "kPa": {
+                "singular": "kilopascal",
+                "plural": "kilopascal"
+            },
+            "hPa": {
+                "singular": "hektopascal",
+                "plural": "hektopascal"
+            },
+            "N": {
+                "singular": "newton",
+                "plural": "newton"
+            },
+            "cc": {
+                "singular": "sentimeter kubik",
+                "plural": "sentimeter kubik"
             }
         }
-        
-        # Override and add values from custom_dict to prefixed_dict
-        self.prefixed_dict = {**self.prefixed_dict, **self.custom_dict}
 
-        # Lowercase version of self.prefixed_dict
-        self.lower_prefixed_dict = {key.lower(): self.prefixed_dict[key] for key in self.prefixed_dict}
-        # Note, byte and bit overlap.                               Byte has preference
-        # electron volts and exavolts overlap.                      Electron Volts has preference
-        # hectares and hectoamperes overlap.                        Hectares has preference
-        # pascals and picoamperes and petaamperers overlap.         Pascals has preference
-        # mega... and milli... overlap.                             Milli... has preference
-        # pico... and peta... overlap.                              Pico... has preference
-        # zetta... and zepto... overlap.                            Zepto... has preference
-        # yotto... and yocto... overlap.                            Yocto... has preference
-        # Daltons and deciamperes overlap.                          Daltons has preference
-        # More overlaps may exist
-
-        # Special suffixes on which the total suffix should be split
-        self.special_suffixes = re.compile(r"(\/|per(?!cent)|sq|2|²|3|³)")
+        # Case insensitive translation dict
+        self.lower_trans_dict = {k.lower(): v for k, v in self.trans_dict.items()}
 
         # Decimal and Fraction conversion
         self.decimal = Decimal()
