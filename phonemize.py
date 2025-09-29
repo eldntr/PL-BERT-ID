@@ -68,30 +68,51 @@ class EnIndPhonemizer:
                 )
             )
 
+# Di dalam file phonemize.py
+
 def phonemize(text, global_phonemizer, tokenizer):
-    """Fungsi kompatibilitas untuk kode lama"""
-    # text = normalize_text(remove_accents(text)) Tidak perlu dinormalisasi karena espeak sudah bisa menangani
-    words = tokenizer.tokenize(text)
+    """
+    Fungsi yang telah disesuaikan untuk menangani subword tokenization dengan benar.
+    """
+    # 1. Pisahkan teks menjadi kata-kata utuh berdasarkan spasi.
+    # Ini adalah langkah krusial yang sebelumnya tidak ada.
+    original_words = text.strip().split()
     
-    phonemes_bad = [phonemize_word(word, True, True, "") if word not in string.punctuation else word for word in words]
     input_ids = []
     phonemes = []
     
-    for i in range(len(words)):
-        word = words[i]
-        phoneme = phonemes_bad[i]
+    # 2. Iterasi melalui setiap KATA UTUH.
+    for word in original_words:
+        # Jika kata adalah tanda baca, perlakukan secara terpisah.
+        if word in string.punctuation:
+            # Tokenisasi tanda baca
+            word_ids = tokenizer.encode(word)
+            if not word_ids: continue # Lanjut jika tokenizer mengabaikan karakter ini
+            
+            input_ids.append(word_ids[0])
+            phonemes.append(word) # Tanda baca tidak memiliki fonem, jadi gunakan karakter aslinya
+            continue
+
+        # 3. Fonemisasi kata utuh untuk mendapatkan pengucapan yang benar.
+        phoneme_str = phonemize_word(word, True, True, "")
         
-        # # Hanya proses kasus khusus untuk "@" (email, mention)
-        # if "@" in word and len(word) > 1: # remove "@"
-        #     phonemes.append(word.replace('@', ''))
-        #     input_ids.append(tokenizer.encode(word.replace('@', ''))[0])
-        #     continue
+        # 4. Tokenisasi kata utuh yang sama untuk mendapatkan ID subword.
+        word_ids = tokenizer.encode(word)
         
-        input_ids.append(tokenizer.encode(word)[0])
-        phonemes.append(phoneme)
-        
+        if not word_ids:
+            continue
+            
+        # 5. Petakan hasil fonem ke subword.
+        # Fonem hanya untuk token pertama, sisanya diberi label kosong.
+        for i, token_id in enumerate(word_ids):
+            input_ids.append(token_id)
+            if i == 0:
+                phonemes.append(phoneme_str)
+            else:
+                phonemes.append("") # atau bisa menggunakan penanda lain seperti "<cont>"
+
     assert len(input_ids) == len(phonemes)
-    return {'input_ids' : input_ids, 'phonemes': phonemes}
+    return {'input_ids': input_ids, 'phonemes': phonemes}
 
 def main():
     # Test Indonesian & English Phonemizer
