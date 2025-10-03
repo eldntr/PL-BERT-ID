@@ -28,7 +28,7 @@ class FilePathDataset(torch.utils.data.Dataset):
     def __init__(self, dataset,
                  token_maps="token_maps.pkl",
                  tokenizer="transfo-xl-wt103",
-                 word_separator=3039, 
+                 word_separator="@@WORD_SEP@@",
                  token_separator=" ", 
                  token_mask="M", 
                  max_mel_length=512,
@@ -43,12 +43,27 @@ class FilePathDataset(torch.utils.data.Dataset):
         self.replace_prob = replace_prob
         self.text_cleaner = TextCleaner()
         
-        self.word_separator = word_separator
         self.token_separator = token_separator
         self.token_mask = token_mask
-        
+
         with open(token_maps, 'rb') as handle:
-            self.token_maps = pickle.load(handle)     
+            raw_maps = pickle.load(handle)
+
+        # dukung format lama & baru
+        if isinstance(raw_maps, dict) and "token_to_id" in raw_maps:
+            self.id_map = None
+            self.token_to_id = dict(raw_maps["token_to_id"])
+        else:
+            self.id_map = {k: v["token"] for k, v in raw_maps.items()}
+            self.token_to_id = {v["word"]: v["token"] for v in raw_maps.values()}
+
+        if isinstance(word_separator, str):
+            try:
+                self.word_separator = self.token_to_id[word_separator]
+            except KeyError as exc:
+                raise ValueError(f"Unknown word separator token: {word_separator}") from exc
+        else:
+            self.word_separator = word_separator
             
     def __len__(self):
         return len(self.data)
@@ -104,7 +119,8 @@ class FilePathDataset(torch.utils.data.Dataset):
             
         phoneme = self.text_cleaner(phoneme)
         labels = self.text_cleaner(labels)
-        words = [self.token_maps[w]['token'] for w in words]
+        if self.id_map is not None:
+            words = [self.id_map[w] for w in words]
         
         assert len(phoneme) == len(words)
         assert len(phoneme) == len(labels)

@@ -8,12 +8,13 @@ import pandas as pd
 from lingua import Language, LanguageDetectorBuilder
 import warnings
 from tqdm import tqdm
-from transformers import TransfoXLTokenizer
+from spacy_tokenizer import SpacyTokenizer
 
 warnings.filterwarnings("ignore", message="Trying to detect language from a single word.")
 
 languages = [Language.ENGLISH, Language.INDONESIAN]
 detector = LanguageDetectorBuilder.from_languages(*languages).build()
+TOKENIZER = SpacyTokenizer(Path(__file__).with_name("token_maps.pkl"))
 
 @lru_cache(maxsize=100_000)
 def detect_lang(word: str) -> str:
@@ -68,9 +69,9 @@ class EnIndPhonemizer:
                 )
             )
 
-def phonemize(text, global_phonemizer, tokenizer):
+def phonemize(text, global_phonemizer, tokenizer: SpacyTokenizer | None = None):
     """Fungsi kompatibilitas untuk kode lama"""
-    # text = normalize_text(remove_accents(text)) Tidak perlu dinormalisasi karena espeak sudah bisa menangani
+    tokenizer = tokenizer or TOKENIZER
     words = tokenizer.tokenize(text)
     
     phonemes_bad = [phonemize_word(word, True, True, "") if word not in string.punctuation else word for word in words]
@@ -104,7 +105,7 @@ def main():
     
     # Initialize phonemizer
     phonemizer_instance = EnIndPhonemizer(ipa=True, keep_stress=True)
-    tokenizer = TransfoXLTokenizer.from_pretrained('transfo-xl-wt103')
+    tokenizer = TOKENIZER
     
     # Test sentences in Indonesian and English
     test_sentences = [
