@@ -14,7 +14,15 @@ warnings.filterwarnings("ignore", message="Trying to detect language from a sing
 
 languages = [Language.ENGLISH, Language.INDONESIAN]
 detector = LanguageDetectorBuilder.from_languages(*languages).build()
-TOKENIZER = SpacyTokenizer(Path(__file__).with_name("token_maps.pkl"))
+DEFAULT_TOKEN_MAP_PATH = Path(__file__).with_name("token_maps.pkl")
+_TOKENIZER: SpacyTokenizer | None = None
+
+
+def get_default_tokenizer() -> SpacyTokenizer:
+    global _TOKENIZER
+    if _TOKENIZER is None:
+        _TOKENIZER = SpacyTokenizer(DEFAULT_TOKEN_MAP_PATH)
+    return _TOKENIZER
 
 @lru_cache(maxsize=100_000)
 def detect_lang(word: str) -> str:
@@ -71,7 +79,7 @@ class EnIndPhonemizer:
 
 def phonemize(text, global_phonemizer, tokenizer: SpacyTokenizer | None = None):
     """Fungsi kompatibilitas untuk kode lama"""
-    tokenizer = tokenizer or TOKENIZER
+    tokenizer = tokenizer or get_default_tokenizer()
     words = tokenizer.tokenize(text)
     
     phonemes_bad = [phonemize_word(word, True, True, "") if word not in string.punctuation else word for word in words]
@@ -105,7 +113,7 @@ def main():
     
     # Initialize phonemizer
     phonemizer_instance = EnIndPhonemizer(ipa=True, keep_stress=True)
-    tokenizer = TOKENIZER
+    tokenizer = get_default_tokenizer()
     
     # Test sentences in Indonesian and English
     test_sentences = [
