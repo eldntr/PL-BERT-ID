@@ -19,8 +19,8 @@
 ```mermaid
 flowchart TD
     A[Dataset sample] --> B[FilePathDataset.__getitem__]
-    B -->|Tokenize| C1[Word tokens (baseline)]
-    B -->|Tokenize| C2[Subword tokens (v2)]
+    B -->|Tokenize| C1[Word tokens .baseline.]
+    B -->|Tokenize| C2[Subword tokens .v2.]
     C1 --> D1[Assign 1 ID per word]
     C2 --> D2[Assign N IDs per word]
     D1 --> E1[Phoneme masking + concat]
@@ -226,9 +226,9 @@ phoneme_tensor = [a, k, u,  , s, u, k, a,  , ˈ, l, ɜ, ː, n, ɪ, ŋ, ...]
 
 ```mermaid
 flowchart TD
-    A[Raw text] --> B[Normalise + tokenize (BPE)]
+    A[Raw text] --> B[Normalise + tokenize .BPE.]
     B --> C[Subword token IDs]
-    A --> D[Phonemize per word (espeak-ng)]
+    A --> D[Phonemize per word .espeak-ng.]
     C --> E[Insert EOS separators]
     D --> F[Concatenate phonemes]
     E --> G[Word tensor]

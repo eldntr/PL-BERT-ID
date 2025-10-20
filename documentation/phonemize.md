@@ -20,21 +20,21 @@ flowchart TD
     B --> C1[Tokenizer]
     B --> C2[Phonemizer]
 
-    subgraph baseline["PL-BERT (baseline)"]
+    subgraph baseline["PL-BERT .baseline."]
         C1 --> D1[Word Tokens]
         C2 --> D2[Global Phonemizer + Rules]
-        D1 --> E1[Token IDs (1 per word)]
-        D2 --> F1[Phonemes (1 per word)]
-        E1 --> G1[Output Dict {input_ids, phonemes}]
+        D1 --> E1[Token IDs .1 per word.]
+        D2 --> F1[Phonemes .1 per word.]
+        E1 --> G1[Output Dict .input_ids, phonemes.]
         F1 --> G1
     end
 
     subgraph plbert_v2["PL-BERT v2"]
         C1 --> D3[BPE Subwords]
-        C2 --> D4[eSpeak-NG (auto-detect EN/ID)]
-        D3 --> E2[Subword Token IDs (1+ per word)]
+        C2 --> D4[eSpeak-NG .auto-detect EN/ID.]
+        D3 --> E2[Subword Token IDs .1+ per word.]
         D4 --> F2[Phonemes per word]
-        E2 --> G2[Output Dict {input_ids, phonemes}]
+        E2 --> G2[Output Dict .input_ids, phonemes.]
         F2 --> G2
     end
 ```
