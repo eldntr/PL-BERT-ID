@@ -7,26 +7,6 @@ import unicodedata
 import os, sys
 import re
 
-from converters.Plain      import Plain
-from converters.Punct      import Punct
-from converters.Date       import Date
-from converters.Letters    import Letters
-from converters.Cardinal   import Cardinal
-from converters.Verbatim   import Verbatim
-from converters.Decimal    import Decimal
-from converters.Measure    import Measure
-from converters.Money      import Money
-from converters.Ordinal    import Ordinal
-from converters.Time       import Time
-from converters.Electronic import Electronic
-from converters.Digit      import Digit
-from converters.Fraction   import Fraction
-from converters.Telephone  import Telephone
-from converters.Address    import Address
-from converters.Roman    import Roman
-from converters.Range    import Range
-
-
 months = ['jan',
  'feb',
  'mar',
@@ -156,7 +136,13 @@ def normalize_single(text, prev_text = "", next_text = ""):
     return text.replace("$", "")
 
 def normalize_text(text):
+    """
     text = remove_accents(text).replace('–', ' to ').replace('-', ' - ').replace(":p", ": p").replace(":P", ": P").replace(":d", ": d").replace(":D", ": D")
+    kode diatas berfungsi untuk menghilangkan aksen pada karakter dalam teks, serta mengganti beberapa karakter khusus dengan spasi atau versi yang lebih mudah diproses. Misalnya, tanda hubung panjang (–) diganti dengan kata "to", tanda hubung biasa (-) diganti dengan spasi di sekitarnya, dan emotikon seperti ":p" atau ":D" dipisahkan dengan spasi agar tidak dianggap sebagai satu kata.
+    Untuk bahasa indonesia, kita akan menyesuaikan 
+    """
+    from utils.normalize import normalize_symbols
+    text = normalize_symbols(remove_accents(text))
     words = word_tokenize(text)
 
     df = pd.DataFrame(words, columns=['before'])

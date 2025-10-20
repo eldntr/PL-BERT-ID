@@ -1,79 +1,84 @@
 import string
-from text_normalize import normalize_text, remove_accents
+import subprocess
+import re
+from functools import lru_cache
+from lingua import Language, LanguageDetectorBuilder
+import warnings
+import unicodedata
+from nltk.tokenize import TweetTokenizer
 
-special_mappings = {
-    "a": "ɐ",
-    "'t": 't',
-    "'ve": "v",
-    "'m": "m",
-    "'re": "ɹ",
-    "d": "d",
-    'll': "l",
-    "n't": "nt",
-    "'ll": "l",
-    "'d": "d",
-    "'": "ʔ",
-    "wasn": "wˈɒzən",
-    "hasn": "hˈæzn",
-    "doesn": "dˈʌzən",
-}
+warnings.filterwarnings("ignore", message="Trying to detect language from a single word.")
 
-def phonemize(text, global_phonemizer, tokenizer):
-    text = normalize_text(remove_accents(text))
-    words = tokenizer.tokenize(text)
-    
-    phonemes_bad = [global_phonemizer.phonemize([word], strip=True)[0] if word not in string.punctuation else word for word in words]
+languages = [Language.ENGLISH, Language.INDONESIAN]
+detector = LanguageDetectorBuilder.from_languages(*languages).build()
+
+@lru_cache(maxsize=100_000)
+def detect_lang(word: str) -> str:
+    result = detector.detect_language_of(word)
+    if result is None:
+        return "id"
+    return "en" if result == Language.ENGLISH else "id"
+
+@lru_cache(maxsize=100_000)
+def phonemize_word(word: str, ipa: bool, keep_stress: bool, sep: str) -> str:
+    lang = detect_lang(word)
+    lang_map = {"id": "id", "en": "en-us"}
+    voice = lang_map.get(lang, "id")
+    cmd = ["espeak-ng", "-v", voice, "-q", f"--sep={sep}", word]
+    if ipa:
+        cmd.insert(3, "--ipa")
+    else:
+        cmd.insert(3, "-x")
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=5)
+        phonemes = result.stdout.decode("utf-8", errors="ignore").strip()
+        phonemes = phonemes.replace("\ufeff", "")
+        if not keep_stress:
+            phonemes = re.sub(r"[ˈˌ]", "", phonemes)
+        return phonemes
+    except (subprocess.TimeoutExpired, Exception):
+        return word
+import re
+import string
+from nltk.tokenize import wordpunct_tokenize
+
+def normalize_text(text):
+    # Bersihkan karakter aneh tapi TIDAK hapus spasi
+    text = text.lower().strip()
+    text = re.sub(r"\s+", " ", text)  # normalize multiple spaces
+    text = re.sub(r"[^a-zA-Z0-9\s.,?!'\"-]", "", text)  # keep only readable chars
+    return text
+
+def phonemize(text, tokenizer):
+    # Normalisasi ringan
+    text = normalize_text(text)
+
+    # Tokenisasi kata (lebih kuat dari TweetTokenizer untuk kalimat panjang)
+    words = wordpunct_tokenize(text)
+    words = [w for w in words if w not in string.punctuation and w.strip() != ""]
+
     input_ids = []
     phonemes = []
-    
-    for i in range(len(words)):
-        word = words[i]
-        phoneme = phonemes_bad[i]
-        
-        for k, v in special_mappings.items():
-            if word == k:
-                phoneme = v
-                break
-        
-        # process special cases (NOT COMPLETE)
-        
-        if word == "'s":
-            if i > 0:
-                if phonemes[i - 1][-1] in ['s', 'ʃ', 'n', ]:
-                    phoneme = "z"
-                else:
-                    phoneme = "s"
-                    
-        if i != len(words) - 1:
-            if words[i+1] == "'t":
-                if word == "haven":
-                    phoneme = "hˈævn"
-                if word == "don":
-                    phoneme = "dˈəʊn"
-        
-        if word == "the": # change the pronunciations before voewls
-            if i < len(words):
-                next_phoneme = phonemes_bad[i + 1].replace('ˈ', '').replace('ˌ', '')
-                if next_phoneme[0] in 'ɪiʊuɔɛeəɜoæʌɑaɐ':
-                    phoneme = "ðɪ"
-                    
-        if word == "&": 
-            if i > 0 and i < len(words):
-                phoneme = "ænd"
-                
-        if word == "A": # capital "a"
-            if i > 0:
-                if words[i - 1] == ".":
-                    phoneme = "ɐ"
-                    
-        if "@" in word and len(word) > 1: # remove "@"
-            if "@" in word and len(word) > 1:
-                phonemes.append(word.replace('@', ''))
-                input_ids.append(tokenizer.encode(word.replace('@', ''))[0])
-                continue
-        
-        input_ids.append(tokenizer.encode(word)[0])
-        phonemes.append(phoneme)
-        
-    assert len(input_ids) == len(phonemes)
-    return {'input_ids' : input_ids, 'phonemes': phonemes}
+
+    for w in words:
+        try:
+            ids = tokenizer.encode(w, add_special_tokens=False)
+            phon = phonemize_word(w, True, True, "")
+        except Exception as e:
+            print(f"[WARN] Skip word '{w}' due to {e}")
+            continue
+
+        if len(ids) == 0:
+            continue
+
+        input_ids.append(ids)
+        phonemes.append(phon)
+
+    # Debug
+    print(f"Tokenized {len(words)} words → {len(input_ids)} encoded")
+    for i, (w, ids) in enumerate(zip(words[:10], input_ids[:10])):
+        toks = tokenizer.convert_ids_to_tokens(ids)
+        print(f"  {i+1:>2}. {w} → {toks}")
+
+    assert len(input_ids) == len(phonemes), "Word vs phoneme mismatch"
+    return {"input_ids": input_ids, "phonemes": phonemes}
