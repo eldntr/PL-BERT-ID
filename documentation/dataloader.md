@@ -25,8 +25,8 @@ flowchart TD
     C2 --> D2[Assign N IDs per word]
     D1 --> E1[Phoneme masking + concat]
     D2 --> E2[Phoneme masking + concat + logging]
-    E1 --> F1[Cleanup → tensors]
-    E2 --> F2[Cleanup → tensors]
+    E1 --> F1[Cleanup -> tensors]
+    E2 --> F2[Cleanup -> tensors]
     F1 --> G1[Return sample]
     F2 --> G2[Return sample]
 ```
