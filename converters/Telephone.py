@@ -50,18 +50,15 @@ class Telephone:
         i = 0
         while i < len(result_list):
             offset = 0
-            # --- PERUBAHAN DI SINI ---
             while i + offset < len(result_list) and result_list[i + offset] == "kosong":
                 offset += 1
 
             # Cek kondisi (sebelumnya harus angka, bukan "kosong" atau "sil")
-            # --- PERUBAHAN DI SINI ---
             if (i + offset >= len(result_list) or result_list[i + offset] == "sil") and \
                (i - 1 < 0 or result_list[i - 1] not in ("kosong", "sil")) and \
                offset in (2, 3):
                 
                 # Ganti "kosong kosong" -> "ratus", "kosong kosong kosong" -> "ribu"
-                # --- PERUBAHAN DI SINI ---
                 result_list[i : offset + i] = ["ratus"] if offset == 2 else ["ribu"]
 
             i += 1
