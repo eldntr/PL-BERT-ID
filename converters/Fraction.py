@@ -113,7 +113,7 @@ class Fraction:
                     else:
                         # Gunakan "per"
                         # "dua" + "per" + "tiga" -> "dua pertiga"
-                        result = f"{numerator_text} per{denominator_cardinal}"
+                        result = f"{numerator_text} per {denominator_cardinal}"
                 
                 # 12 Cek sisa angka (misal: "8" dari "8 1/2")
                 remainder = self.slash_regex.sub("", token).strip()

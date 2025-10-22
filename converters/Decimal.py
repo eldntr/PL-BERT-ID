@@ -47,6 +47,40 @@ class Decimal:
     
     def convert(self, token: str) -> str:
 
+        def normalize_separators(raw_token: str) -> str:
+            match = re.match(r"(-?[\d.,]+)", raw_token)
+            if not match:
+                return raw_token
+            number_part = match.group(1)
+            rest = raw_token[match.end():]
+
+            last_dot = number_part.rfind(".")
+            last_comma = number_part.rfind(",")
+
+            if "," in number_part and "." in number_part:
+                if last_dot > last_comma:
+                    number_part = number_part.replace(",", "")
+                else:
+                    number_part = number_part.replace(".", "")
+                    number_part = number_part.replace(",", ".", 1)
+            elif "," in number_part:
+                if number_part.count(",") == 1:
+                    number_part = number_part.replace(",", ".", 1)
+                else:
+                    number_part = number_part.replace(",", "")
+            elif "." in number_part:
+                segments = number_part.split(".")
+                if len(segments) > 1 and all(len(segment) == 3 for segment in segments[1:] if segment != ""):
+                    number_part = "".join(segments)
+                else:
+                    number_part = number_part.replace(",", "")
+            else:
+                number_part = number_part.replace(",", "")
+
+            return number_part + rest
+
+        token = normalize_separators(token)
+
         # 1 Filter koma (ribuan)
         token = self.filter_regex.sub("", token)
 
@@ -82,6 +116,16 @@ class Decimal:
         result_list = []
         
         # 6, 7, 8 Logika untuk bagian desimal
+        if len(decimal) > 0:
+            if suffix == "" and number and decimal.isdigit():
+                if set(decimal) == {"0"}:
+                    if len(decimal) % 3 == 0:
+                        number += decimal
+                    decimal = ""
+                elif len(decimal) % 3 == 0:
+                    number += decimal
+                    decimal = ""
+
         if len(decimal) > 0:
             result_list.append("koma")
             

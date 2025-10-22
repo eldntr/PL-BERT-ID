@@ -166,19 +166,26 @@ class Date:
             self.text_mdy_regex.match(token)
         )
         if match:
-            day_num, month_num, year_num = match.group("day"), match.group("month"), match.group("year")
+            group_dict = match.groupdict()
+            day_num = group_dict.get("day")
+            month_num = group_dict.get("month")
+            year_num = group_dict.get("year")
             
             # Coba tukar jika formatnya jelas salah (misal 31-01-2000 tapi ter-match sbg MM-DD)
             try:
-                if int(month_num) > 12:
+                if month_num is not None and int(month_num) > 12:
                     month_num, day_num = day_num, month_num
             except ValueError:
                 # Bulan adalah teks (misal "januari"), tidak perlu ditukar
                 pass
+            except TypeError:
+                # Salah satu nilai None, abaikan
+                pass
 
-            month = self.get_month(month_num)
+            if month_num:
+                month = self.get_month(month_num)
             year = self.convert_year(year_num)
-            if day:
+            if day_num:
                 # Gunakan CARDINAL
                 day = self.cardinal.convert(day_num) 
             return construct_output()
@@ -189,19 +196,23 @@ class Date:
             match = self.mdy_regex.match(token)
         
         if match:
-            if match.group("day"):
+            group_dict = match.groupdict()
+            day_value = group_dict.get("day")
+            month_token = group_dict.get("month")
+            if day_value:
                 # Gunakan CARDINAL
-                day = self.cardinal.convert(match.group("day")) 
-            month = self.get_month(match.group("month"))
+                day = self.cardinal.convert(day_value) 
+            if month_token:
+                month = self.get_month(month_token)
             
             # Cek apakah ini dekade (misal "2000s")
-            if match.group("suffix"):
-                year = self.convert_year(match.group("year"), cardinal=False) # cardinal=False -> tambahkan "-an"
+            if group_dict.get("suffix"):
+                year = self.convert_year(group_dict.get("year"), cardinal=False) # cardinal=False -> tambahkan "-an"
             else:
-                year = self.convert_year(match.group("year"))
+                year = self.convert_year(group_dict.get("year"))
             
             try:
-                suffix = self.get_suffix(match.group("bcsuffix"))
+                suffix = self.get_suffix(group_dict.get("bcsuffix"))
             except (IndexError, AttributeError):
                 pass
             return construct_output()
