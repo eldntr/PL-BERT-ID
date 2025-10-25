@@ -56,7 +56,6 @@ def phonemize(text, tokenizer):
             ids = tokenizer.encode(w, add_special_tokens=False)
             phon = phonemize_word(w, True, True, "")
         except Exception as e:
-            print(f"[WARN] Skip word '{w}' due to {e}")
             continue
 
         if len(ids) == 0:

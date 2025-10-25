@@ -49,13 +49,9 @@ class FilePathDataset(torch.utils.data.Dataset):
         self.token_separator = token_separator
         self.token_mask = token_mask
 
-        # ✅ Load BPE tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer)
         self.vocab = self.tokenizer.get_vocab()
         self.word_separator = self.tokenizer.eos_token_id  # optional separator token
-
-        print(f"[INFO] Vocab size: {len(self.vocab)}")
-        print(f"[INFO] EOS token ID used as word separator: {self.word_separator}")
 
     def __len__(self):
         return len(self.data)
@@ -69,11 +65,7 @@ class FilePathDataset(torch.utils.data.Dataset):
         labels = ""
         phoneme = ""
         masked_index = []
-
-        print(f"\n=== [IDX {idx}] INPUT DATA ===")
-        print(f"Phonemes (word-level): {phonemes}")
-        print(f"Input IDs (per-word BPE): {input_ids}")
-
+        
         phoneme_list = ''.join(phonemes)
         masked_idx_list = []
 
@@ -81,11 +73,6 @@ class FilePathDataset(torch.utils.data.Dataset):
             subword_tokens = self.tokenizer.convert_ids_to_tokens(bpe_ids)
             words.extend(bpe_ids)
             labels += phoneme_word + " "
-
-            print(f"\n--- Word {i+1} ---")
-            print(f"  phoneme_word : {phoneme_word}")
-            print(f"  bpe_ids      : {bpe_ids}")
-            print(f"  subword_tokens : {subword_tokens}")
 
             # Masking di level kata (phoneme)
             if np.random.rand() < self.word_mask_prob:
@@ -97,28 +84,22 @@ class FilePathDataset(torch.utils.data.Dataset):
                             for _ in range(len(phoneme_word))
                         ])
                         phoneme += phoneme_rand
-                        print(f"  -> phoneme randomized: {phoneme_rand}")
                     else:
                         phoneme += phoneme_word
-                        print("  -> phoneme kept (replaced same word)")
                 else:
                     phoneme_masked = self.token_mask * len(phoneme_word)
                     phoneme += phoneme_masked
-                    print(f"  -> phoneme masked: {phoneme_masked}")
                     masked_idx_list.extend(
                         np.arange(len(phoneme) - len(phoneme_word), len(phoneme)).tolist()
                     )
             else:
                 phoneme += phoneme_word
-                print("  -> phoneme kept as is")
 
             phoneme += self.token_separator
             words.append(self.word_separator)
 
         mel_length = len(phoneme)
-        print(f"\n[After loop] phoneme string: {phoneme}")
-        print(f"[After loop] masked_idx_list: {masked_idx_list}")
-
+        
         # Truncation bila mel_length > max_mel_length
         masked_index = []
         if mel_length > self.max_mel_length:
@@ -128,7 +109,6 @@ class FilePathDataset(torch.utils.data.Dataset):
             for m in masked_idx_list:
                 if m >= random_start and m < random_start + self.max_mel_length:
                     masked_index.append(m - random_start)
-            print(f"[Truncated to max length {self.max_mel_length}]")
         else:
             masked_index = masked_idx_list
 
@@ -140,12 +120,6 @@ class FilePathDataset(torch.utils.data.Dataset):
         phonemes_tensor = torch.LongTensor(phoneme_clean)
         labels_tensor = torch.LongTensor(labels_clean)
         words_tensor = torch.LongTensor(words)
-
-        print("\n=== FINAL OUTPUT ===")
-        print(f"phoneme_clean (len={len(phoneme_clean)}): {phoneme_clean}")
-        print(f"labels_clean  (len={len(labels_clean)}): {labels_clean}")
-        print(f"words_tensor  (len={len(words_tensor)}): {words_tensor}")
-        print(f"masked_index  : {masked_index}")
 
         return phonemes_tensor, words_tensor, labels_tensor, masked_index   
         
@@ -199,25 +173,6 @@ class Collater(object):
             if self.word_separator is not None:
                 valid_mask &= word_slice != self.word_separator
             token_lengths.append(int(valid_mask.sum().item()))
-
-            if self.debug:
-                print(f"\n[Batch {bid}] sequence len={seq_len}, word len={word_len}")
-                print(f"  masked_index count={len(masked_index)}")
-                print(f"  phoneme[:20] → {phoneme[:20].tolist()}")
-                print(f"  label[:20]   → {label[:20].tolist()}")
-                print(f"  word[:10]    → {word[:10].tolist()}")
-
-        # Cetak ringkasan batch
-        if self.debug:
-            print("\n=== [COLLATE DEBUG SUMMARY] ===")
-            print(f"Batch size: {batch_size}")
-            print(f"Max sequence length: {max_seq_length}")
-            print(f"Phonemes shape: {phonemes.shape}")
-            print(f"Labels shape:   {labels.shape}")
-            print(f"Words shape:    {words.shape}")
-            print(f"Input lengths:  {input_lengths}")
-            print(f"Masked indices: {[len(m) for m in masked_indices]}")
-            print(f"Token lengths:  {token_lengths}")
 
         return words, labels, phonemes, input_lengths, masked_indices, token_lengths
 
