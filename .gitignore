@@ -1,2 +1,5 @@
 wiki*
 *.pyc
+wandb
+logs
+Checkpoint
