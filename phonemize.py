@@ -2,9 +2,10 @@ import re
 import subprocess
 import warnings
 from functools import lru_cache
+
+from lingua import Language, LanguageDetectorBuilder
 from transformers import AutoTokenizer
 from text_normalize import normalize_text
-from lingua import Language, LanguageDetectorBuilder
 
 warnings.filterwarnings("ignore", message="Trying to detect language from a single word.")
 
@@ -30,52 +31,66 @@ def phonemize_word(word: str, ipa: bool, keep_stress: bool, sep: str) -> str:
         cmd.insert(3, "-x")
     try:
         result = subprocess.run(cmd, capture_output=True, timeout=5)
-        phonemes = result.stdout.decode("utf-8", errors="ignore").strip().replace("\ufeff", "")
+        phonemes = result.stdout.decode("utf-8", errors="ignore").strip()
+        phonemes = phonemes.replace("\ufeff", "")
         if not keep_stress:
             phonemes = re.sub(r"[ˈˌ]", "", phonemes)
-        return phonemes or word
+        return phonemes
     except (subprocess.TimeoutExpired, Exception):
         return word
 
 def phonemize(text, tokenizer):
-    """Return BPE-aligned phonemization dict (flattened input_ids & 1-1 with phoneme_subtokens)."""
     original_text = text
     normalized_text = normalize_text(text)
+
     words = re.findall(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)*", normalized_text)
     detok_after = " ".join(words)
 
-    all_input_ids = []
-    all_tokens = []
-    phoneme_words = []
-    phoneme_subtokens = []
+    input_ids = []
+    phonemes = []
+    bpe_tokens = []
+    decoded_tokens = []
 
     for w in words:
         try:
             ids = tokenizer.encode(w, add_special_tokens=False)
-            tokens = tokenizer.convert_ids_to_tokens(ids)
-            phon = phonemize_word(w, ipa=True, keep_stress=False, sep="")
-        except Exception:
-            continue
-        if not ids:
+            phon = phonemize_word(w, True, True, "")
+        except Exception as e:
             continue
 
-        phoneme_words.append(w)
-        all_input_ids.extend(ids)
-        all_tokens.extend(tokens)
-        phoneme_subtokens.extend([phon] * len(ids))
+        if len(ids) == 0:
+            continue
 
+        input_ids.append(ids)
+        bpe_tokens.append(tokenizer.convert_ids_to_tokens(ids))
+        decoded_tokens.append(tokenizer.decode(ids))
+        phonemes.append(phon)
+
+    assert len(input_ids) == len(phonemes), "Word vs phoneme mismatch"
     return {
         "before": original_text,
         "after": detok_after,
-        "phoneme_words": phoneme_words,
-        "bpe_tokens": all_tokens,
-        "input_ids": all_input_ids,          # flattened list[int]
-        "phoneme_subtokens": phoneme_subtokens,  # len == len(input_ids)
+        "phoneme_words": words,
+        "phonemes": phonemes,
+        "input_ids": input_ids,
+        "bpe_tokens": bpe_tokens,
+        "decoded_tokens": decoded_tokens,
     }
 
+
 if __name__ == "__main__":
-    sample_text = "Hello dunia saya belajar"
+    sample_text = "hello (dua puluh tiga januari dua ribu dua puluh dua belas sepuluh AM)"
     tokenizer_name = "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+    except Exception as exc:
+        raise SystemExit(f"Gagal memuat tokenizer '{tokenizer_name}': {exc}") from exc
+
     result = phonemize(sample_text, tokenizer)
-    print(len(result["input_ids"]), len(result["phoneme_subtokens"]))
+
+    print("\nPhonemized output:")
+    for word, ids, phoneme in zip(result["phoneme_words"], result["input_ids"], result["phonemes"]):
+        decoded = tokenizer.decode(ids).strip()
+        tokens = tokenizer.convert_ids_to_tokens(ids)
+        print(f"{word}\t{phoneme}\t{decoded}\t{tokens}")
