@@ -7,7 +7,13 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.optim import AdamW
-from transformers import AlbertConfig, AlbertModel, AutoTokenizer
+from transformers import (
+    AlbertConfig,
+    AlbertModel,
+    AutoTokenizer,
+    get_cosine_schedule_with_warmup,
+    get_linear_schedule_with_warmup,
+)
 from model import MultiTaskModel
 from dataloader import build_dataloader
 from utils import length_to_mask
@@ -96,9 +102,30 @@ def train():
         weight_decay=float(config["optimizer"]["weight_decay"]),
     )
 
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=config["scheduler"]["T_max"]
-    )
+    scheduler_cfg = config.get("scheduler", {})
+    scheduler_name = scheduler_cfg.get("name", "").lower()
+    warmup_steps = int(scheduler_cfg.get("warmup_steps", 0) or 0)
+    total_steps = int(config["num_steps"])
+    scheduler = None
+
+    if scheduler_name == "cosine_with_warmup":
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer=optimizer,
+            num_warmup_steps=min(warmup_steps, total_steps),
+            num_training_steps=total_steps,
+            num_cycles=float(scheduler_cfg.get("num_cycles", 0.5)),
+        )
+    elif scheduler_name == "linear_with_warmup":
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer=optimizer,
+            num_warmup_steps=min(warmup_steps, total_steps),
+            num_training_steps=total_steps,
+        )
+    elif scheduler_name and scheduler_name != "none":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=int(scheduler_cfg.get("T_max", max(1, total_steps))),
+        )
 
     scaler = torch.amp.GradScaler(device=device_type, enabled=config["mixed_precision"])
     max_grad_norm = config["optimizer"]["max_grad_norm"]
@@ -116,6 +143,8 @@ def train():
                 )
                 bert.load_state_dict(checkpoint["net"], strict=False)
                 optimizer.load_state_dict(checkpoint["optimizer"])
+                if scheduler is not None and "scheduler" in checkpoint:
+                    scheduler.load_state_dict(checkpoint["scheduler"])
                 start_step = checkpoint["step"]
                 print(f"✅ Resumed from step {start_step}")
             except Exception as e:
@@ -125,16 +154,24 @@ def train():
     token_weight = config["loss_weights"]["token_init"]
     warmup_steps = config["loss_weights"]["warmup_steps"]
 
-    num_steps = config["num_steps"]
+    num_steps = int(config["num_steps"])
     log_interval = config["log_interval"]
     save_interval = config["save_interval"]
+    grad_accum_steps = max(1, int(config.get("gradient_accumulation_steps", 1)))
 
     print("🚀 Start training...")
     running_loss = 0.0
-    progress = tqdm(total=num_steps - start_step, initial=start_step, dynamic_ncols=True)
+    progress = tqdm(total=num_steps, initial=start_step, dynamic_ncols=True)
+    global_step = start_step
+    accum_batches = 0
+    accum_loss = 0.0
+    accum_vocab_loss = 0.0
+    accum_token_loss = 0.0
 
-    for step, batch in enumerate(train_loader, start=start_step + 1):
-        if step > num_steps:
+    optimizer.zero_grad(set_to_none=True)
+
+    for batch in train_loader:
+        if global_step >= num_steps:
             break
 
         words, labels, phonemes, input_lengths, masked_indices, token_lengths = batch
@@ -176,45 +213,67 @@ def train():
             if count > 0:
                 loss_token /= count
 
-            if step > warmup_steps:
+            if global_step >= warmup_steps:
                 ctc_weight = config["loss_weights"]["ctc_after"]
                 token_weight = config["loss_weights"]["token_after"]
 
             loss = ctc_weight * loss_vocab + token_weight * loss_token
 
-        optimizer.zero_grad()
-        scaler.scale(loss).backward()
+        accum_batches += 1
+        accum_loss += loss.item()
+        accum_vocab_loss += loss_vocab.item()
+        accum_token_loss += loss_token.item()
+
+        scaled_loss = loss / grad_accum_steps
+        scaler.scale(scaled_loss).backward()
+
+        if accum_batches % grad_accum_steps != 0:
+            continue
+
         scaler.unscale_(optimizer)
         if config["gradient_clip"]:
             torch.nn.utils.clip_grad_norm_(bert.parameters(), max_grad_norm)
         scaler.step(optimizer)
         scaler.update()
-        scheduler.step()
+        optimizer.zero_grad(set_to_none=True)
+        if scheduler is not None:
+            scheduler.step()
 
-        running_loss += loss.item()
-        lr = scheduler.get_last_lr()[0]
+        global_step += 1
+
+        avg_loss = accum_loss / accum_batches
+        avg_vocab_loss = accum_vocab_loss / accum_batches
+        avg_token_loss = accum_token_loss / accum_batches
+
+        running_loss += avg_loss
+        lr = optimizer.param_groups[0]["lr"]
 
         with open(log_txt_path, "a") as f:
-            f.write(f"{step},{loss.item():.6f},{loss_vocab.item():.6f},{loss_token.item():.6f},{lr:.8f}\n")
+            f.write(f"{global_step},{avg_loss:.6f},{avg_vocab_loss:.6f},{avg_token_loss:.6f},{lr:.8f}\n")
 
         if wandb_cfg.get("enabled", False):
             wandb.log({
-                "step": step,
-                "loss": loss.item(),
-                "vocab_loss": loss_vocab.item(),
-                "token_loss": loss_token.item(),
+                "step": global_step,
+                "loss": avg_loss,
+                "vocab_loss": avg_vocab_loss,
+                "token_loss": avg_token_loss,
                 "lr": lr,
             })
 
-        progress.set_description(f"Step {step}")
-        progress.set_postfix(loss=f"{loss.item():.3f}", ctc=f"{loss_vocab.item():.3f}", token=f"{loss_token.item():.3f}", lr=f"{lr:.6f}")
+        progress.set_description(f"Step {global_step}")
+        progress.set_postfix(
+            loss=f"{avg_loss:.3f}",
+            ctc=f"{avg_vocab_loss:.3f}",
+            token=f"{avg_token_loss:.3f}",
+            lr=f"{lr:.6f}",
+        )
         progress.update(1)
 
-        if step % config["plot"]["refresh_interval"] == 0:
-            steps.append(step)
-            losses.append(loss.item())
-            vocab_losses.append(loss_vocab.item())
-            token_losses.append(loss_token.item())
+        if global_step % config["plot"]["refresh_interval"] == 0:
+            steps.append(global_step)
+            losses.append(avg_loss)
+            vocab_losses.append(avg_vocab_loss)
+            token_losses.append(avg_token_loss)
             line1.set_data(steps, losses)
             line2.set_data(steps, vocab_losses)
             line3.set_data(steps, token_losses)
@@ -225,13 +284,19 @@ def train():
             if wandb_cfg.get("enabled", False):
                 wandb.log({"plot": wandb.Image(osp.join(log_dir, config["plot"]["save_path"]))})
 
-        if step % save_interval == 0:
+        if global_step % save_interval == 0:
             state = {
                 "net": bert.state_dict(),
                 "optimizer": optimizer.state_dict(),
-                "step": step,
+                "step": global_step,
             }
-            torch.save(state, osp.join(log_dir, f"step_{step}.t7"))
+            if scheduler is not None:
+                state["scheduler"] = scheduler.state_dict()
+            torch.save(state, osp.join(log_dir, f"step_{global_step}.t7"))
+        accum_batches = 0
+        accum_loss = 0.0
+        accum_vocab_loss = 0.0
+        accum_token_loss = 0.0
 
     progress.close()
     if use_interactive_backend:
