@@ -20,9 +20,9 @@ optimizer:
   max_grad_norm: 1.0
 
 scheduler:
-  name: "cosine_with_warmup"   # options: cosine_with_warmup / linear_with_warmup / none
+  name: "linear"               # options: linear / cosine / none
   warmup_steps: 20000
-  num_cycles: 0.5              # only used for cosine_with_warmup
+  num_cycles: 0.5              # only used for cosine
 
 mixed_precision: true
 gradient_clip: true

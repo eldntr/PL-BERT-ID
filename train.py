@@ -103,19 +103,20 @@ def train():
     )
 
     scheduler_cfg = config.get("scheduler", {})
-    scheduler_name = scheduler_cfg.get("name", "").lower()
+    scheduler_name = scheduler_cfg.get("name") or config.get("lr_scheduler_type", "")
+    scheduler_name = scheduler_name.lower()
     warmup_steps = int(scheduler_cfg.get("warmup_steps", 0) or 0)
     total_steps = int(config["num_steps"])
     scheduler = None
 
-    if scheduler_name == "cosine_with_warmup":
+    if scheduler_name in {"cosine_with_warmup", "cosine"}:
         scheduler = get_cosine_schedule_with_warmup(
             optimizer=optimizer,
             num_warmup_steps=min(warmup_steps, total_steps),
             num_training_steps=total_steps,
             num_cycles=float(scheduler_cfg.get("num_cycles", 0.5)),
         )
-    elif scheduler_name == "linear_with_warmup":
+    elif scheduler_name in {"linear_with_warmup", "linear"}:
         scheduler = get_linear_schedule_with_warmup(
             optimizer=optimizer,
             num_warmup_steps=min(warmup_steps, total_steps),
