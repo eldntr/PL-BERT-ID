@@ -121,9 +121,12 @@ def train(config_path: str = "config.yml"):
     #   words_pred : (B, T, V_ctc)    -> CTC loss (sebelum log_softmax)
     # -----------------------------
     logger.info("Building model ...")
-    albert_conf = AlbertConfig(**config["model_params"])
+    model_params = config.get("model_params", {})
+    head_params = config.get("head_params", {})
+
+    albert_conf = AlbertConfig(**model_params)
     backbone = AlbertModel(albert_conf)
-    model = MultiTaskModel(backbone, **config.get("head_params", {})).to(device)
+    model = MultiTaskModel(backbone, **head_params).to(device)
 
     logger.info(f"Trainable params: {count_parameters(model):,}")
 
@@ -161,7 +164,11 @@ def train(config_path: str = "config.yml"):
     token_weight = float(loss_weights.get("token_before", 0.0))
 
     # Sanity check dimensi head token
-    expected_token_vocab = int(config["model_params"]["vocab_size"])
+    token_vocab_config = head_params.get("vocab_size_token")
+    expected_token_vocab = (
+        model.token_head.out_features if token_vocab_config is None
+        else int(token_vocab_config)
+    )
     # (Pastikan head CE model kamu pakai dim terakhir = expected_token_vocab)
 
     scaler = torch.cuda.amp.GradScaler(enabled=(device_type == "cuda" and mixed_precision))
