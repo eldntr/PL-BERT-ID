@@ -126,56 +126,60 @@ class FilePathDataset(torch.utils.data.Dataset):
 class Collater(object):
     """
     Collater untuk batching dataset FilePathDataset.
-    Melakukan padding ke panjang maksimum dalam batch
-    dan mengembalikan semua tensor dengan urutan yang sama.
-    Menyertakan log debug agar mudah melacak alignment antar sequence.
+    Menghasilkan:
+      - words:    (B, T)   -> target CTC (BPE ids) + pad
+      - labels:   (B, T)   -> target CE (token/phoneme ids) + pad (0)
+      - phonemes: (B, T)   -> input time-steps ke encoder/token-head
+      - input_lengths:  list[int] -> panjang efektif phoneme per sampel
+      - masked_indices: list[list[int]] -> posisi CE yang dipakai
+      - token_lengths:  list[int] -> panjang efektif target CTC per sampel (tanpa pad/eos)
+      - target_lengths: list[int] -> panjang efektif target CE per sampel (labels!=0)
     """
 
     def __init__(self, tokenizer=None, return_wave=False, debug=False):
         self.return_wave = return_wave
         self.debug = debug
-        # Gunakan pad_token_id dari tokenizer jika ada
         self.text_pad_index = tokenizer.pad_token_id if tokenizer and tokenizer.pad_token_id is not None else 0
         self.word_separator = getattr(tokenizer, "eos_token_id", None) if tokenizer else None
 
     def __call__(self, batch):
         batch_size = len(batch)
-
-        # Urutkan berdasarkan panjang phoneme (b[0])
-        lengths = [b[0].shape[0] for b in batch]
+        lengths = [b[0].shape[0] for b in batch]  # len(phoneme)
         batch_indexes = np.argsort(lengths)[::-1]
         batch = [batch[i] for i in batch_indexes]
 
         max_seq_length = max(lengths)
-
-        # Inisialisasi tensor padded
-        words = torch.full((batch_size, max_seq_length), self.text_pad_index, dtype=torch.long)
-        labels = torch.zeros((batch_size, max_seq_length), dtype=torch.long)
+        words    = torch.full((batch_size, max_seq_length), self.text_pad_index, dtype=torch.long)
+        labels   = torch.zeros((batch_size, max_seq_length), dtype=torch.long)
         phonemes = torch.zeros((batch_size, max_seq_length), dtype=torch.long)
 
-        input_lengths = []
-        token_lengths = []
-        masked_indices = []
+        input_lengths   = []
+        token_lengths   = []
+        target_lengths  = []
+        masked_indices  = []
 
         for bid, (phoneme, word, label, masked_index) in enumerate(batch):
-            seq_len = min(phoneme.size(0), label.size(0), max_seq_length)
+            seq_len  = min(phoneme.size(0), label.size(0), max_seq_length)
             word_len = min(word.size(0), max_seq_length)
 
             phonemes[bid, :seq_len] = phoneme[:seq_len]
-            labels[bid, :seq_len] = label[:seq_len]
-            words[bid, :word_len] = word[:word_len]
+            labels[bid,   :seq_len] = label[:seq_len]
+            words[bid,    :word_len]= word[:word_len]
 
             input_lengths.append(seq_len)
             masked_indices.append(masked_index)
 
+            # Hitung token_lengths untuk CTC: valid=BPE token selain pad & eos
             word_slice = word[:word_len]
-            valid_mask = word_slice != self.text_pad_index
+            valid_mask_ctc = (word_slice != self.text_pad_index)
             if self.word_separator is not None:
-                valid_mask &= word_slice != self.word_separator
-            token_lengths.append(int(valid_mask.sum().item()))
+                valid_mask_ctc &= (word_slice != self.word_separator)
+            token_lengths.append(int(valid_mask_ctc.sum().item()))
 
-        return words, labels, phonemes, input_lengths, masked_indices, token_lengths
+            # target_lengths untuk CE (labels!=0)
+            target_lengths.append(int((labels[bid, :seq_len] != 0).sum().item()))
 
+        return words, labels, phonemes, input_lengths, masked_indices, token_lengths, target_lengths
 
 
 def build_dataloader(df,

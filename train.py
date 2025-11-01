@@ -1,312 +1,361 @@
+# coding: utf-8
 import os
-import shutil
 import os.path as osp
+import math
 import time
 import yaml
+import shutil
+import random
+import logging
+from typing import List, Tuple
+
+import numpy as np
 import torch
-from torch import nn
 import torch.nn.functional as F
-from torch.optim import AdamW
-from transformers import (
-    AlbertConfig,
-    AlbertModel,
-    AutoTokenizer,
-    get_cosine_schedule_with_warmup,
-    get_linear_schedule_with_warmup,
-)
-from model import MultiTaskModel
-from dataloader import build_dataloader
-from utils import length_to_mask
+from torch import nn, optim
+
 from datasets import load_from_disk
-from tqdm import tqdm
-import matplotlib
-import matplotlib.pyplot as plt
-import wandb
-use_interactive_backend = not matplotlib.get_backend().lower().startswith("agg")
+from transformers import AutoTokenizer, AlbertConfig, AlbertModel, get_cosine_schedule_with_warmup
+
+# ====== Impor model kamu ======
+# Pastikan salah satu dari dua baris ini berhasil.
+try:
+    from model import MultiTaskModel  # sesuaikan dengan proyekmu
+except Exception:
+    from models import MultiTaskModel  # fallback kalau paketnya berbeda
+
+# ====== Impor dataloader (punyamu) ======
+from dataloader import build_dataloader
+
+# =========================================
+# Utils
+# =========================================
+def seed_everything(seed: int = 42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+def length_to_mask(lengths: torch.Tensor, max_len: int = None) -> torch.BoolTensor:
+    """
+    lengths: (B,) panjang valid per sampel
+    return : (B, T_max) boolean mask True untuk posisi valid
+    """
+    if max_len is None:
+        max_len = int(lengths.max().item())
+    rng = torch.arange(max_len, device=lengths.device)[None, :]  # (1, T)
+    return rng < lengths[:, None]  # (B, T)
+
+def count_parameters(model: torch.nn.Module) -> int:
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
-CONFIG_PATH = "Configs/config.yml"
-with open(CONFIG_PATH) as f:
-    config = yaml.safe_load(f)
+# =========================================
+# Training
+# =========================================
+def train(config_path: str = "config.yml"):
+    # -----------------------------
+    # Load config
+    # -----------------------------
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
 
-device = (
-    torch.device("cuda") if torch.cuda.is_available() and config["device"] in ["auto", "cuda"]
-    else torch.device("cpu")
-)
-device_type = "cuda" if device.type == "cuda" else "cpu"
+    seed_everything(config.get("seed", 42))
 
-wandb_cfg = config.get("wandb", {})
-if wandb_cfg.get("enabled", False):
-    os.environ["WANDB_API_KEY"] = wandb_cfg["api_key"]
-    wandb.init(
-        project=wandb_cfg["project"],
-        name=f"{config['config_name']}_{time.strftime('%Y%m%d_%H%M%S')}",
-        config=config,
-    )
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device_type = "cuda" if torch.cuda.is_available() else "cpu"
+    mixed_precision = bool(config.get("mixed_precision", True))
 
-
-def train():
-    dataset = load_from_disk(config["data_folder"])
-    log_dir = config["log_dir"]
+    # -----------------------------
+    # Paths & logging
+    # -----------------------------
+    log_dir = config.get("log_dir", "./logs")
     os.makedirs(log_dir, exist_ok=True)
-    shutil.copy(CONFIG_PATH, osp.join(log_dir, osp.basename(CONFIG_PATH)))
+    shutil.copy(config_path, osp.join(log_dir, osp.basename(config_path)))
 
-    log_txt_path = osp.join(log_dir, "training_log.txt")
-    with open(log_txt_path, "w") as f:
-        f.write("step,loss,vocab_loss,token_loss,lr\n")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(osp.join(log_dir, "train.log"), mode="a")
+        ]
+    )
+    logger = logging.getLogger("train")
 
-    if use_interactive_backend:
-        plt.ion()
-    fig, ax = plt.subplots(figsize=(8, 4))
-    steps, losses, vocab_losses, token_losses = [], [], [], []
-    line1, = ax.plot([], [], label="Total Loss", color="blue")
-    line2, = ax.plot([], [], label="CTC Loss", color="red", alpha=0.6)
-    line3, = ax.plot([], [], label="Token Loss", color="green", alpha=0.6)
-    ax.legend()
-    ax.set_xlabel("Step")
-    ax.set_ylabel("Loss")
-    ax.set_title("Training Progress")
-    if use_interactive_backend:
-        fig.canvas.draw()
-    plt.tight_layout()
+    # -----------------------------
+    # Dataset & DataLoader
+    # config["data_folder"]   -> path dataset (HF datasets.load_from_disk)
+    # config["batch_size"]
+    # config["dataset_params"] -> dict utk FilePathDataset
+    # -----------------------------
+    logger.info("Loading dataset from disk ...")
+    dataset = load_from_disk(config["data_folder"])
+
+    batch_size = int(config.get("batch_size", 4))
+    num_workers = int(config.get("num_workers", 0))
 
     train_loader = build_dataloader(
         dataset,
-        batch_size=config["batch_size"],
-        num_workers=0,
-        dataset_config=config["dataset_params"],
+        validation=False,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        device=device,
+        dataset_config=config.get("dataset_params", {}),
+        collate_config={}  # Collater kamu sudah dipakai di dalam build_dataloader
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(config["dataset_params"]["tokenizer"])
-    pad_id = tokenizer.pad_token_id or 0
-    eos_id = tokenizer.eos_token_id
-    vocab_size_ctc = tokenizer.vocab_size
-    blank_id = 0
-    ctc_output_dim = vocab_size_ctc + 1
+    # Ambil tokenizer dari dataset (melalui FilePathDataset)
+    # build_dataloader membuat FilePathDataset internal dan Collater dengan tokenizer tsb.
+    # Untuk sinkronisasi, kita inisialisasi tokenizer lagi dengan nama yg sama:
+    tk_name = config.get("dataset_params", {}).get(
+        "tokenizer", "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
+    )
+    tokenizer = AutoTokenizer.from_pretrained(tk_name)
 
-    albert_cfg = AlbertConfig(**config["model_params"])
-    bert = AlbertModel(albert_cfg)
-    bert = MultiTaskModel(
-        bert,
-        num_vocab=ctc_output_dim,
-        num_tokens=config["model_params"]["vocab_size"],
-        hidden_size=config["model_params"]["hidden_size"],
-    ).to(device)
+    # -----------------------------
+    # Model
+    # config["model_params"]: dict utk AlbertConfig, dsb.
+    # model mengeluarkan dua head:
+    #   tokens_pred: (B, T, V_token)  -> CE loss
+    #   words_pred : (B, T, V_ctc)    -> CTC loss (sebelum log_softmax)
+    # -----------------------------
+    logger.info("Building model ...")
+    albert_conf = AlbertConfig(**config["model_params"])
+    backbone = AlbertModel(albert_conf)
+    model = MultiTaskModel(backbone, **config.get("head_params", {})).to(device)
 
-    ctc_loss_fn = nn.CTCLoss(blank=blank_id, zero_infinity=True)
+    logger.info(f"Trainable params: {count_parameters(model):,}")
+
+    # -----------------------------
+    # Optimizer & Scheduler
+    # -----------------------------
+    learning_rate = float(config.get("learning_rate", 5e-5))
+    weight_decay = float(config.get("weight_decay", 0.0))
+    num_steps = int(config.get("num_steps", 10000))
+    warmup_steps = int(config.get("warmup_steps", 1000))
+
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    scheduler = get_cosine_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=warmup_steps,
+        num_training_steps=num_steps
+    )
+
+    # -----------------------------
+    # Losses
+    # -----------------------------
+    # CTC: blank=0 dan zero_infinity untuk stabilitas
+    ctc_loss_fn = nn.CTCLoss(blank=0, zero_infinity=True)
+    # CE: reduction=mean
     ce_loss_fn = nn.CrossEntropyLoss()
 
-    optimizer = AdamW(
-        bert.parameters(),
-        lr=float(config["optimizer"]["learning_rate"]),
-        weight_decay=float(config["optimizer"]["weight_decay"]),
-    )
+    # Loss weights
+    loss_weights = config.get("loss_weights", {
+        "ctc_before": 1.0,
+        "token_before": 0.0,
+        "ctc_after": 1.0,
+        "token_after": 1.0
+    })
+    ctc_weight = float(loss_weights.get("ctc_before", 1.0))
+    token_weight = float(loss_weights.get("token_before", 0.0))
 
-    scheduler_cfg = config.get("scheduler", {})
-    scheduler_name = scheduler_cfg.get("name") or config.get("lr_scheduler_type", "")
-    scheduler_name = scheduler_name.lower()
-    warmup_steps = int(scheduler_cfg.get("warmup_steps", 0) or 0)
-    total_steps = int(config["num_steps"])
-    scheduler = None
+    # Sanity check dimensi head token
+    expected_token_vocab = int(config["model_params"]["vocab_size"])
+    # (Pastikan head CE model kamu pakai dim terakhir = expected_token_vocab)
 
-    if scheduler_name in {"cosine_with_warmup", "cosine"}:
-        scheduler = get_cosine_schedule_with_warmup(
-            optimizer=optimizer,
-            num_warmup_steps=min(warmup_steps, total_steps),
-            num_training_steps=total_steps,
-            num_cycles=float(scheduler_cfg.get("num_cycles", 0.5)),
-        )
-    elif scheduler_name in {"linear_with_warmup", "linear"}:
-        scheduler = get_linear_schedule_with_warmup(
-            optimizer=optimizer,
-            num_warmup_steps=min(warmup_steps, total_steps),
-            num_training_steps=total_steps,
-        )
-    elif scheduler_name and scheduler_name != "none":
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=int(scheduler_cfg.get("T_max", max(1, total_steps))),
-        )
+    scaler = torch.cuda.amp.GradScaler(enabled=(device_type == "cuda" and mixed_precision))
 
-    scaler = torch.amp.GradScaler(device=device_type, enabled=config["mixed_precision"])
-    max_grad_norm = config["optimizer"]["max_grad_norm"]
+    # -----------------------------
+    # Training loop
+    # -----------------------------
+    global_step = 0
+    model.train()
 
-    start_step = 0
-    if config.get("resume", False):
-        ckpts = [f for f in os.listdir(log_dir) if f.startswith("step_")]
-        if ckpts:
-            try:
-                last_ckpt = sorted(
-                    int(f.split("_")[-1].split(".")[0]) for f in ckpts
-                )[-1]
-                checkpoint = torch.load(
-                    osp.join(log_dir, f"step_{last_ckpt}.t7"), map_location=device
+    logger.info("Start training ...")
+    start_time = time.time()
+
+    while global_step < num_steps:
+        for batch in train_loader:
+            if global_step >= num_steps:
+                break
+
+            # Collater (versi perbaikan) mengembalikan:
+            # words, labels, phonemes, input_lengths, masked_indices, token_lengths, target_lengths
+            (
+                words,
+                labels,
+                phonemes,
+                input_lengths,
+                masked_indices,
+                token_lengths,
+                target_lengths_ce
+            ) = batch
+
+            words = words.to(device)         # (B, T)
+            labels = labels.to(device)       # (B, T), id untuk CE head
+            phonemes = phonemes.to(device)   # (B, T), id/time-steps untuk encoder
+
+            # panjang input (time steps) per sampel
+            phoneme_lengths = torch.tensor(input_lengths, dtype=torch.long, device=device)  # (B,)
+
+            # attention_mask: 1=valid, 0=pad (BENAR, jangan dibalik)
+            mask_bool = length_to_mask(phoneme_lengths, max_len=phonemes.size(1))  # (B, T) bool
+            attention_mask = mask_bool.to(dtype=torch.long)  # (B, T)
+
+            with torch.cuda.amp.autocast(enabled=(device_type == "cuda" and mixed_precision)):
+                # Forward; model harus mengembalikan dua head:
+                #   tokens_pred: (B, T, V_token)  -> CE
+                #   words_pred : (B, T, V_ctc)    -> CTC
+                tokens_pred, words_pred = model(phonemes, attention_mask=attention_mask)
+
+                # ---------- CTC ----------
+                # words_pred -> (B, T, V_ctc) → log_probs (T, B, V_ctc)
+                log_probs = F.log_softmax(words_pred, dim=-1).transpose(0, 1)  # (T, B, C)
+
+                # Siapkan target CTC dari 'words' (BPE) tanpa pad/eos
+                pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
+                eos_id = tokenizer.eos_token_id
+
+                valid_mask_ctc = (words != pad_id)
+                if eos_id is not None:
+                    valid_mask_ctc &= (words != eos_id)
+
+                # Per-sampel panjang target CTC
+                target_lengths_tensor = torch.tensor(
+                    token_lengths, device=device, dtype=torch.long
+                )  # (B,)
+
+                # !!! Penting: input_lengths untuk CTC adalah panjang time-steps (dari encoder input)
+                input_lengths_tensor = phoneme_lengths  # (B,)
+
+                # Filter sampel tidak valid: target_len==0 atau target_len>input_len
+                keep = (target_lengths_tensor > 0) & (input_lengths_tensor >= target_lengths_tensor)
+                if torch.any(~keep):
+                    # Filter log_probs (dim=1 = batch)
+                    log_probs = log_probs[:, keep, :]
+                    input_lengths_tensor = input_lengths_tensor[keep]
+                    target_lengths_tensor = target_lengths_tensor[keep]
+
+                # Rebangun targets sesuai 'keep'
+                if keep.ndim == 0:
+                    # edge case (jarang)
+                    keep_words = words.unsqueeze(0)
+                    keep_mask = valid_mask_ctc.unsqueeze(0)
+                else:
+                    keep_words = words[keep]
+                    keep_mask = valid_mask_ctc[keep]
+
+                # Concatenate semua target valid per-batch
+                if keep_words.size(0) == 0:
+                    # Tidak ada sampel valid di batch ini
+                    global_step += 1
+                    continue
+
+                targets_list = [wk[vk] for wk, vk in zip(keep_words, keep_mask)]
+                if len(targets_list) == 0:
+                    global_step += 1
+                    continue
+                targets = torch.cat(targets_list, dim=0)
+
+                # Guard batch kosong setelah filtering
+                T_cur, N_cur = log_probs.size(0), log_probs.size(1)
+                if targets.numel() == 0 or N_cur == 0:
+                    global_step += 1
+                    continue
+
+                loss_vocab = ctc_loss_fn(
+                    log_probs,                # (T, B, C)
+                    targets,                  # (sum target_lengths)
+                    input_lengths_tensor,     # (B,)
+                    target_lengths_tensor     # (B,)
                 )
-                bert.load_state_dict(checkpoint["net"], strict=False)
-                optimizer.load_state_dict(checkpoint["optimizer"])
-                if scheduler is not None and "scheduler" in checkpoint:
-                    scheduler.load_state_dict(checkpoint["scheduler"])
-                start_step = checkpoint["step"]
-                print(f"✅ Resumed from step {start_step}")
-            except Exception as e:
-                print(f"⚠️ Resume failed: {e}")
 
-    ctc_weight = config["loss_weights"]["ctc_init"]
-    token_weight = config["loss_weights"]["token_init"]
-    warmup_steps = config["loss_weights"]["warmup_steps"]
+                # ---------- CE (token head) ----------
+                # tokens_pred: (B, T, V_token)
+                V_tok = tokens_pred.size(-1)
+                if V_tok != expected_token_vocab:
+                    raise ValueError(f"Token-head dim mismatch: model={V_tok} vs config={expected_token_vocab}")
 
-    num_steps = int(config["num_steps"])
-    log_interval = config["log_interval"]
-    save_interval = config["save_interval"]
-    grad_accum_steps = max(1, int(config.get("gradient_accumulation_steps", 1)))
-
-    print("🚀 Start training...")
-    running_loss = 0.0
-    progress = tqdm(total=num_steps, initial=start_step, dynamic_ncols=True)
-    global_step = start_step
-    accum_batches = 0
-    accum_loss = 0.0
-    accum_vocab_loss = 0.0
-    accum_token_loss = 0.0
-
-    optimizer.zero_grad(set_to_none=True)
-
-    for batch in train_loader:
-        if global_step >= num_steps:
-            break
-
-        words, labels, phonemes, input_lengths, masked_indices, token_lengths = batch
-        words, labels, phonemes = (
-            words.to(device),
-            labels.to(device),
-            phonemes.to(device),
-        )
-
-        phoneme_lengths = torch.tensor(input_lengths, dtype=torch.long)
-        mask = length_to_mask(phoneme_lengths).to(device)
-
-        with torch.amp.autocast(device_type=device_type, enabled=config["mixed_precision"]):
-            tokens_pred, words_pred = bert(phonemes, attention_mask=(~mask).int())
-            log_probs = F.log_softmax(words_pred, dim=-1).transpose(0, 1)
-            T, N = log_probs.size(0), log_probs.size(1)
-
-            valid_mask = words != pad_id
-            if eos_id is not None:
-                valid_mask &= words != eos_id
-
-            targets = torch.masked_select(words, valid_mask)
-            input_lengths_tensor = torch.full((N,), T, dtype=torch.long, device=device)
-            target_lengths_tensor = torch.tensor(token_lengths, dtype=torch.long, device=device)
-
-            if torch.any(target_lengths_tensor == 0) or targets.numel() == 0:
-                continue
-
-            loss_vocab = ctc_loss_fn(log_probs, targets, input_lengths_tensor, target_lengths_tensor)
-            loss_token = torch.tensor(0.0, device=device)
-            count = 0
-            for pred, lbl, length, masked in zip(tokens_pred, labels, input_lengths, masked_indices):
-                if len(masked) > 0:
-                    span = lbl[:length][masked].to(device)
-                    if span.numel() == 0:
+                loss_token = torch.tensor(0.0, device=device)
+                count = 0
+                # Iter per-sampel untuk pakai masked_indices
+                for pred, lbl, L, masked in zip(tokens_pred, labels, input_lengths, masked_indices):
+                    L = int(L)
+                    if L <= 0 or len(masked) == 0:
                         continue
-                    loss_token += ce_loss_fn(pred[:length][masked].to(device), span)
+                    idx = torch.as_tensor(masked, dtype=torch.long, device=device)
+                    idx = idx[idx < L]  # batasin di panjang valid
+                    if idx.numel() == 0:
+                        continue
+
+                    span = lbl[:L][idx]  # (K,)
+                    # Buang label di luar rentang (jaga stabilitas)
+                    keep_ce = (span >= 0) & (span < V_tok)
+                    if keep_ce.sum().item() == 0:
+                        continue
+                    span = span[keep_ce]
+                    idx = idx[keep_ce]
+
+                    loss_token += ce_loss_fn(pred[:L][idx], span)  # CE per posisi
                     count += 1
-            if count > 0:
-                loss_token /= count
+                if count > 0:
+                    loss_token = loss_token / count
 
-            if global_step >= warmup_steps:
-                ctc_weight = config["loss_weights"]["ctc_after"]
-                token_weight = config["loss_weights"]["token_after"]
+                # ---------- weighting ----------
+                if global_step >= warmup_steps:
+                    ctc_weight = float(loss_weights.get("ctc_after", 1.0))
+                    token_weight = float(loss_weights.get("token_after", 1.0))
 
-            loss = ctc_weight * loss_vocab + token_weight * loss_token
+                loss = ctc_weight * loss_vocab + token_weight * loss_token
 
-        accum_batches += 1
-        accum_loss += loss.item()
-        accum_vocab_loss += loss_vocab.item()
-        accum_token_loss += loss_token.item()
+            # -----------------------------
+            # Backprop
+            # -----------------------------
+            optimizer.zero_grad(set_to_none=True)
 
-        scaled_loss = loss / grad_accum_steps
-        scaler.scale(scaled_loss).backward()
+            if device_type == "cuda" and mixed_precision:
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), config.get("max_grad_norm", 1.0))
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), config.get("max_grad_norm", 1.0))
+                optimizer.step()
 
-        if accum_batches % grad_accum_steps != 0:
-            continue
-
-        scaler.unscale_(optimizer)
-        if config["gradient_clip"]:
-            torch.nn.utils.clip_grad_norm_(bert.parameters(), max_grad_norm)
-        scaler.step(optimizer)
-        scaler.update()
-        optimizer.zero_grad(set_to_none=True)
-        if scheduler is not None:
             scheduler.step()
+            global_step += 1
 
-        global_step += 1
+            if global_step % int(config.get("log_interval", 50)) == 0:
+                logger.info(
+                    f"step={global_step} | loss={loss.item():.4f} "
+                    f"(ctc={loss_vocab.item():.4f}, ce={loss_token.item():.4f}) | "
+                    f"ctc_w={ctc_weight:.2f}, ce_w={token_weight:.2f}"
+                )
 
-        avg_loss = accum_loss / accum_batches
-        avg_vocab_loss = accum_vocab_loss / accum_batches
-        avg_token_loss = accum_token_loss / accum_batches
+            if global_step % int(config.get("ckpt_interval", 1000)) == 0:
+                ckpt_path = osp.join(log_dir, f"model_step_{global_step}.pt")
+                torch.save(
+                    {
+                        "step": global_step,
+                        "model": model.state_dict(),
+                        "optimizer": optimizer.state_dict(),
+                        "scheduler": scheduler.state_dict(),
+                        "config": config,
+                    },
+                    ckpt_path,
+                )
+                logger.info(f"Saved checkpoint: {ckpt_path}")
 
-        running_loss += avg_loss
-        lr = optimizer.param_groups[0]["lr"]
-
-        with open(log_txt_path, "a") as f:
-            f.write(f"{global_step},{avg_loss:.6f},{avg_vocab_loss:.6f},{avg_token_loss:.6f},{lr:.8f}\n")
-
-        if wandb_cfg.get("enabled", False):
-            wandb.log({
-                "step": global_step,
-                "loss": avg_loss,
-                "vocab_loss": avg_vocab_loss,
-                "token_loss": avg_token_loss,
-                "lr": lr,
-            })
-
-        progress.set_description(f"Step {global_step}")
-        progress.set_postfix(
-            loss=f"{avg_loss:.3f}",
-            ctc=f"{avg_vocab_loss:.3f}",
-            token=f"{avg_token_loss:.3f}",
-            lr=f"{lr:.6f}",
-        )
-        progress.update(1)
-
-        if global_step % config["plot"]["refresh_interval"] == 0:
-            steps.append(global_step)
-            losses.append(avg_loss)
-            vocab_losses.append(avg_vocab_loss)
-            token_losses.append(avg_token_loss)
-            line1.set_data(steps, losses)
-            line2.set_data(steps, vocab_losses)
-            line3.set_data(steps, token_losses)
-            ax.relim(); ax.autoscale_view()
-            if use_interactive_backend:
-                plt.draw(); plt.pause(0.001)
-            plt.savefig(osp.join(log_dir, config["plot"]["save_path"]))
-            if wandb_cfg.get("enabled", False):
-                wandb.log({"plot": wandb.Image(osp.join(log_dir, config["plot"]["save_path"]))})
-
-        if global_step % save_interval == 0:
-            state = {
-                "net": bert.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "step": global_step,
-            }
-            if scheduler is not None:
-                state["scheduler"] = scheduler.state_dict()
-            torch.save(state, osp.join(log_dir, f"step_{global_step}.t7"))
-        accum_batches = 0
-        accum_loss = 0.0
-        accum_vocab_loss = 0.0
-        accum_token_loss = 0.0
-
-    progress.close()
-    if use_interactive_backend:
-        plt.ioff()
-    plt.savefig(osp.join(log_dir, config["plot"]["save_path"]))
-    print(f"✅ Training complete. Log: {log_txt_path}")
+    total_time = time.time() - start_time
+    logger.info(f"Training finished: steps={global_step}, time={total_time/60:.2f} min")
 
 
 if __name__ == "__main__":
-    torch.cuda.empty_cache()
-    torch.cuda.ipc_collect()
-    train()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default="config.yml")
+    args = parser.parse_args()
+    train(args.config)
