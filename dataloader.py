@@ -1,12 +1,9 @@
-#coding: utf-8
-
+# coding: utf-8
 import os
 import os.path as osp
 import time
 import random
 import numpy as np
-import random
-
 import string
 import pickle
 
@@ -24,7 +21,7 @@ logger.setLevel(logging.DEBUG)
 
 np.random.seed(1)
 random.seed(1)
- 
+
 class FilePathDataset(torch.utils.data.Dataset):
     def __init__(self, dataset,
                  tokenizer="GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct",
@@ -35,10 +32,9 @@ class FilePathDataset(torch.utils.data.Dataset):
                  phoneme_mask_prob=0.1,
                  replace_prob=0.2):
         """
-        Dataset untuk input speech/text berbasis BPE tokenizer (Llama v2).
-        Phoneme tetap di word-level, tetapi teks menggunakan subword (BPE).
+        Dataset untuk input speech/text berbasis BPE tokenizer.
+        Phoneme tetap di word-level, teks menggunakan subword (BPE).
         """
-
         self.data = dataset
         self.max_mel_length = max_mel_length
         self.word_mask_prob = word_mask_prob
@@ -51,7 +47,9 @@ class FilePathDataset(torch.utils.data.Dataset):
 
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer)
         self.vocab = self.tokenizer.get_vocab()
-        self.word_separator = self.tokenizer.eos_token_id  # optional separator token
+        self.word_separator = self.tokenizer.eos_token_id  # optional
+        # Pilih pad id aman untuk batching
+        self.pad_id = self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else (self.word_separator if self.word_separator is not None else 0)
 
     def __len__(self):
         return len(self.data)
@@ -65,12 +63,12 @@ class FilePathDataset(torch.utils.data.Dataset):
         labels = ""
         phoneme = ""
         masked_index = []
-        
+
         phoneme_list = ''.join(phonemes)
         masked_idx_list = []
 
-        for i, (phoneme_word, bpe_ids) in enumerate(zip(phonemes, input_ids)):
-            subword_tokens = self.tokenizer.convert_ids_to_tokens(bpe_ids)
+        for phoneme_word, bpe_ids in zip(phonemes, input_ids):
+            # subword_tokens = self.tokenizer.convert_ids_to_tokens(bpe_ids)  # optional debug
             words.extend(bpe_ids)
             labels += phoneme_word + " "
 
@@ -88,26 +86,27 @@ class FilePathDataset(torch.utils.data.Dataset):
                         phoneme += phoneme_word
                 else:
                     phoneme_masked = self.token_mask * len(phoneme_word)
+                    start = len(phoneme)
                     phoneme += phoneme_masked
-                    masked_idx_list.extend(
-                        np.arange(len(phoneme) - len(phoneme_word), len(phoneme)).tolist()
-                    )
+                    masked_idx_list.extend(list(range(start, start + len(phoneme_word))))
             else:
                 phoneme += phoneme_word
 
+            # pemisah kata untuk fonem + word separator untuk BPE group
             phoneme += self.token_separator
-            words.append(self.word_separator)
+            if self.word_separator is not None:
+                words.append(self.word_separator)
 
         mel_length = len(phoneme)
-        
-        # Truncation bila mel_length > max_mel_length
+
+        # Truncation bila > max_mel_length (sinkronkan labels & masked indices)
         masked_index = []
         if mel_length > self.max_mel_length:
             random_start = np.random.randint(0, mel_length - self.max_mel_length)
             phoneme = phoneme[random_start:random_start + self.max_mel_length]
             labels = labels[random_start:random_start + self.max_mel_length]
             for m in masked_idx_list:
-                if m >= random_start and m < random_start + self.max_mel_length:
+                if random_start <= m < random_start + self.max_mel_length:
                     masked_index.append(m - random_start)
         else:
             masked_index = masked_idx_list
@@ -116,26 +115,13 @@ class FilePathDataset(torch.utils.data.Dataset):
         phoneme_clean = self.text_cleaner(phoneme)
         labels_clean = self.text_cleaner(labels)
 
-        # ✅ Convert ke tensor
         phonemes_tensor = torch.LongTensor(phoneme_clean)
         labels_tensor = torch.LongTensor(labels_clean)
         words_tensor = torch.LongTensor(words)
 
-        return phonemes_tensor, words_tensor, labels_tensor, masked_index   
-        
-class Collater(object):
-    """
-    Collater untuk batching dataset FilePathDataset.
-    Menghasilkan:
-      - words:    (B, T)   -> target CTC (BPE ids) + pad
-      - labels:   (B, T)   -> target CE (token/phoneme ids) + pad (0)
-      - phonemes: (B, T)   -> input time-steps ke encoder/token-head
-      - input_lengths:  list[int] -> panjang efektif phoneme per sampel
-      - masked_indices: list[list[int]] -> posisi CE yang dipakai
-      - token_lengths:  list[int] -> panjang efektif target CTC per sampel (tanpa pad/eos)
-      - target_lengths: list[int] -> panjang efektif target CE per sampel (labels!=0)
-    """
+        return phonemes_tensor, words_tensor, labels_tensor, masked_index
 
+class Collater(object):
     def __init__(self, tokenizer=None, return_wave=False, debug=False):
         self.return_wave = return_wave
         self.debug = debug
@@ -144,43 +130,43 @@ class Collater(object):
 
     def __call__(self, batch):
         batch_size = len(batch)
-        lengths = [b[0].shape[0] for b in batch]  # len(phoneme)
-        batch_indexes = np.argsort(lengths)[::-1]
-        batch = [batch[i] for i in batch_indexes]
+
+        # Urutkan berdasarkan panjang phoneme (b[0])
+        lengths = [b[0].shape[0] for b in batch]
+        order = np.argsort(lengths)[::-1]
+        batch = [batch[i] for i in order]
 
         max_seq_length = max(lengths)
-        words    = torch.full((batch_size, max_seq_length), self.text_pad_index, dtype=torch.long)
-        labels   = torch.zeros((batch_size, max_seq_length), dtype=torch.long)
+
+        # Inisialisasi tensor padded (semua disamakan ke panjang phoneme terpanjang)
+        words = torch.full((batch_size, max_seq_length), self.text_pad_index, dtype=torch.long)
+        labels = torch.zeros((batch_size, max_seq_length), dtype=torch.long)
         phonemes = torch.zeros((batch_size, max_seq_length), dtype=torch.long)
 
-        input_lengths   = []
-        token_lengths   = []
-        target_lengths  = []
-        masked_indices  = []
+        input_lengths = []
+        token_lengths = []
+        masked_indices = []
 
         for bid, (phoneme, word, label, masked_index) in enumerate(batch):
-            seq_len  = min(phoneme.size(0), label.size(0), max_seq_length)
+            seq_len = min(phoneme.size(0), label.size(0), max_seq_length)
+
+            # Batas target words ke seq_len agar CTC target_length ≤ input_length
             word_len = min(word.size(0), max_seq_length)
 
             phonemes[bid, :seq_len] = phoneme[:seq_len]
-            labels[bid,   :seq_len] = label[:seq_len]
-            words[bid,    :word_len]= word[:word_len]
+            labels[bid, :seq_len] = label[:seq_len]
+            words[bid, :word_len] = word[:word_len]
 
             input_lengths.append(seq_len)
-            masked_indices.append(masked_index)
+            masked_indices.append([m for m in masked_index if m < seq_len])
 
-            # Hitung token_lengths untuk CTC: valid=BPE token selain pad & eos
-            word_slice = word[:word_len]
-            valid_mask_ctc = (word_slice != self.text_pad_index)
+            word_slice = words[bid, :word_len]
+            valid_mask = (word_slice != self.text_pad_index)
             if self.word_separator is not None:
-                valid_mask_ctc &= (word_slice != self.word_separator)
-            token_lengths.append(int(valid_mask_ctc.sum().item()))
+                valid_mask &= (word_slice != self.word_separator)
+            token_lengths.append(int(valid_mask.sum().item()))
 
-            # target_lengths untuk CE (labels!=0)
-            target_lengths.append(int((labels[bid, :seq_len] != 0).sum().item()))
-
-        return words, labels, phonemes, input_lengths, masked_indices, token_lengths, target_lengths
-
+        return words, labels, phonemes, input_lengths, masked_indices, token_lengths
 
 def build_dataloader(df,
                      validation=False,
@@ -189,11 +175,10 @@ def build_dataloader(df,
                      device='cpu',
                      collate_config={},
                      dataset_config={}):
-
     dataset = FilePathDataset(df, **dataset_config)
     collate_fn = Collater(tokenizer=dataset.tokenizer, **collate_config)
 
-    data_loader = DataLoader(
+    loader = DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=(not validation),
@@ -202,5 +187,4 @@ def build_dataloader(df,
         collate_fn=collate_fn,
         pin_memory=(device != 'cpu')
     )
-
-    return data_loader
+    return loader
