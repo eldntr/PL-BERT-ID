@@ -22,8 +22,8 @@ from tqdm import tqdm
 import matplotlib
 import matplotlib.pyplot as plt
 import wandb
-use_interactive_backend = not matplotlib.get_backend().lower().startswith("agg")
 
+use_interactive_backend = not matplotlib.get_backend().lower().startswith("agg")
 
 CONFIG_PATH = "Configs/config.yml"
 with open(CONFIG_PATH) as f:
@@ -131,26 +131,6 @@ def train():
     scaler = torch.amp.GradScaler(device=device_type, enabled=config["mixed_precision"])
     max_grad_norm = config["optimizer"]["max_grad_norm"]
 
-    start_step = 0
-    if config.get("resume", False):
-        ckpts = [f for f in os.listdir(log_dir) if f.startswith("step_")]
-        if ckpts:
-            try:
-                last_ckpt = sorted(
-                    int(f.split("_")[-1].split(".")[0]) for f in ckpts
-                )[-1]
-                checkpoint = torch.load(
-                    osp.join(log_dir, f"step_{last_ckpt}.t7"), map_location=device
-                )
-                bert.load_state_dict(checkpoint["net"], strict=False)
-                optimizer.load_state_dict(checkpoint["optimizer"])
-                if scheduler is not None and "scheduler" in checkpoint:
-                    scheduler.load_state_dict(checkpoint["scheduler"])
-                start_step = checkpoint["step"]
-                print(f"✅ Resumed from step {start_step}")
-            except Exception as e:
-                print(f"⚠️ Resume failed: {e}")
-
     ctc_weight = config["loss_weights"]["ctc_init"]
     token_weight = config["loss_weights"]["token_init"]
     warmup_steps = config["loss_weights"]["warmup_steps"]
@@ -161,47 +141,51 @@ def train():
     grad_accum_steps = max(1, int(config.get("gradient_accumulation_steps", 1)))
 
     print("🚀 Start training...")
-    running_loss = 0.0
-    progress = tqdm(total=num_steps, initial=start_step, dynamic_ncols=True)
-    global_step = start_step
-    accum_batches = 0
-    accum_loss = 0.0
-    accum_vocab_loss = 0.0
-    accum_token_loss = 0.0
+    progress = tqdm(total=num_steps, dynamic_ncols=True)
+    global_step = 0
 
     optimizer.zero_grad(set_to_none=True)
+    accum_batches, accum_loss, accum_vocab_loss, accum_token_loss = 0, 0.0, 0.0, 0.0
 
     for batch in train_loader:
         if global_step >= num_steps:
             break
 
         words, labels, phonemes, input_lengths, masked_indices, token_lengths = batch
-        words, labels, phonemes = (
-            words.to(device),
-            labels.to(device),
-            phonemes.to(device),
-        )
-
+        words, labels, phonemes = words.to(device), labels.to(device), phonemes.to(device)
         phoneme_lengths = torch.tensor(input_lengths, dtype=torch.long)
         mask = length_to_mask(phoneme_lengths).to(device)
 
         with torch.amp.autocast(device_type=device_type, enabled=config["mixed_precision"]):
             tokens_pred, words_pred = bert(phonemes, attention_mask=(~mask).int())
-            log_probs = F.log_softmax(words_pred, dim=-1).transpose(0, 1)
+            log_probs = F.log_softmax(words_pred, dim=-1).transpose(0, 1)  # (T, N, C)
             T, N = log_probs.size(0), log_probs.size(1)
 
-            valid_mask = words != pad_id
-            if eos_id is not None:
-                valid_mask &= words != eos_id
+            # --- Perbaikan utama: hitung target per full sequence ---
+            targets_list, target_lengths_list = [], []
+            for b in range(N):
+                seq = words[b]
+                valid_mask = (seq != pad_id)
+                if eos_id is not None:
+                    valid_mask &= (seq != eos_id)
+                target_seq = seq[valid_mask]
+                if target_seq.numel() == 0:
+                    continue
+                targets_list.append(target_seq)
+                target_lengths_list.append(len(target_seq))
 
-            targets = torch.masked_select(words, valid_mask)
-            input_lengths_tensor = torch.full((N,), T, dtype=torch.long, device=device)
-            target_lengths_tensor = torch.tensor(token_lengths, dtype=torch.long, device=device)
-
-            if torch.any(target_lengths_tensor == 0) or targets.numel() == 0:
+            if len(targets_list) == 0:
                 continue
 
-            loss_vocab = ctc_loss_fn(log_probs, targets, input_lengths_tensor, target_lengths_tensor)
+            targets = torch.cat(targets_list)
+            target_lengths_tensor = torch.tensor(target_lengths_list, dtype=torch.long, device=device)
+            input_lengths_tensor = torch.full((len(targets_list),), T, dtype=torch.long, device=device)
+
+            loss_vocab = ctc_loss_fn(
+                log_probs[:, :len(targets_list), :], targets, input_lengths_tensor, target_lengths_tensor
+            )
+
+            # --- Token loss (mask prediction) ---
             loss_token = torch.tensor(0.0, device=device)
             count = 0
             for pred, lbl, length, masked in zip(tokens_pred, labels, input_lengths, masked_indices):
@@ -214,6 +198,7 @@ def train():
             if count > 0:
                 loss_token /= count
 
+            # --- Dynamic loss weighting ---
             if global_step >= warmup_steps:
                 ctc_weight = config["loss_weights"]["ctc_after"]
                 token_weight = config["loss_weights"]["token_after"]
@@ -241,12 +226,9 @@ def train():
             scheduler.step()
 
         global_step += 1
-
         avg_loss = accum_loss / accum_batches
         avg_vocab_loss = accum_vocab_loss / accum_batches
         avg_token_loss = accum_token_loss / accum_batches
-
-        running_loss += avg_loss
         lr = optimizer.param_groups[0]["lr"]
 
         with open(log_txt_path, "a") as f:
@@ -294,6 +276,7 @@ def train():
             if scheduler is not None:
                 state["scheduler"] = scheduler.state_dict()
             torch.save(state, osp.join(log_dir, f"step_{global_step}.t7"))
+
         accum_batches = 0
         accum_loss = 0.0
         accum_vocab_loss = 0.0

@@ -1,246 +1,232 @@
-# FilePathDataset and Collater Comparison
+# FilePathDataset, Collater, dan `build_dataloader`
 
-## Overview
+Dokumen ini memberikan penjelasan teknis mendalam mengenai pipeline pemuatan data pada `dataloader.py`. Seluruh proses mengubah data hasil pra-proses menjadi batch tensor siap latih untuk PL-BERT berbasis subword (BPE).
 
-| Aspect | PL-BERT (word-level baseline) | PL-BERT v2 (subword/BPE) |
-| --- | --- | --- |
-| Primary languages | English | Indonesian–English mixed |
-| Tokenizer | `transfo-xl-wt103` (word-level) | `GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct` (BPE) |
-| Token mapping | Serialized `token_maps.pkl` | Direct from Hugging Face `AutoTokenizer` |
-| Alignment | 1 word ↔ 1 token ↔ 1 phoneme | 1 word ↔ N subwords ↔ 1 phoneme |
-| Phoneme masking | Word-level | Word-level with per-phoneme probability |
-| Logging | Minimal | Optional verbose logging per step |
-| Language coverage | English only | Multilingual via `espeak-ng` + Lingua |
-| Padding / separators | Fixed integer separator (`3039`) | EOS token from tokenizer |
-| Output tensors | `phonemes`, `words`, `labels`, `masked_index` | Same tensors + debug metadata |
+---
 
-## Dataset Flow
+## Format Data Masukan
 
-```mermaid
-flowchart TD
-    A[Dataset sample] --> B[FilePathDataset.__getitem__]
-    B -->|Tokenize| C1[Word tokens .baseline.]
-    B -->|Tokenize| C2[Subword tokens .v2.]
-    C1 --> D1[Assign 1 ID per word]
-    C2 --> D2[Assign N IDs per word]
-    D1 --> E1[Phoneme masking + concat]
-    D2 --> E2[Phoneme masking + concat + logging]
-    E1 --> F1[Cleanup -> tensors]
-    E2 --> F2[Cleanup -> tensors]
-    F1 --> G1[Return sample]
-    F2 --> G2[Return sample]
+Setiap entri dataset (`dataset[idx]`) adalah `dict` dengan struktur:
+
+| Kunci | Tipe | Contoh | Catatan |
+| --- | --- | --- | --- |
+| `phonemes` | `List[str]` | `["sˌaja", "ˈandʒiŋ"]` | Fonem per kata, hasil dari modul phonemizer. |
+| `input_ids` | `List[List[int]]` | `[[128000, 82, 12874], [53191, 287]]` | Token BPE per kata, hasil `AutoTokenizer`. |
+
+Data ini dihasilkan oleh `preprocess.py` yang melakukan normalisasi teks, mendeteksi bahasa, mengubah ke fonem, dan memetakan kata ke token BPE.
+
+---
+
+## FilePathDataset
+
+### Inisialisasi dan Atribut
+
+Ketika `FilePathDataset` dibuat, langkah berikut terjadi:
+
+1. Simpan daftar sample mentah (`self.data = dataset`).
+2. Inisialisasi parameter masking (`word_mask_prob`, `phoneme_mask_prob`, `replace_prob`) dan batas panjang (`max_mel_length`).
+3. Buat instance `TextCleaner` yang memetakan karakter fonem ke indeks integer.
+4. Inisialisasi tokenizer melalui `AutoTokenizer.from_pretrained(tokenizer)`.
+5. Tentukan ID khusus:
+   - `self.word_separator = tokenizer.eos_token_id` (jika tersedia) untuk memisahkan kata di tensor token.
+   - `self.pad_id` mengambil `pad_token_id` jika ada, jika tidak fallback ke `word_separator` atau `0`.
+
+Reproducibility dijaga dengan `np.random.seed(1)` dan `random.seed(1)` pada modul.
+
+### Tanda Tangan Output
+
+Pemanggilan `dataset[idx]` mengembalikan:
+
+```
+phonemes_tensor: torch.LongTensor [mel_length]
+words_tensor   : torch.LongTensor [num_word_tokens]
+labels_tensor  : torch.LongTensor [mel_length]
+masked_index   : List[int]
 ```
 
-## Sample Input
+- `phonemes_tensor` berisi phoneme yang telah dimasker (karakter → ID).
+- `labels_tensor` berisi phoneme asli (sebelum masking).
+- `words_tensor` merupakan flatten dari BPE token per kata ditambah `word_separator` setelah setiap kata (jika ada).
+- `masked_index` menyimpan posisi karakter fonem yang dimasker setelah pemotongan (jika terjadi).
 
-Sentence used throughout the comparison:
+### Detail Langkah `__getitem__`
 
-> Aku suka learning new things in Jakarta
+1. **Ambil sample**  
+   ```python
+   item = self.data[idx]
+   phonemes = item["phonemes"]
+   input_ids = item["input_ids"]
+   ```
+   Diasumsikan panjang `phonemes` dan `input_ids` sama.
 
-## Tokenization and Phoneme Output
+2. **Flatten token BPE**  
+   - `words.extend(bpe_ids)` menambahkan sub-token ke list datar.  
+   - Jika `word_separator` ada, tambahkan ID tersebut sebagai limiter antar kata.
 
-### PL-BERT (word-level)
+3. **Bangun string fonem dan label**  
+   - `labels` menyimpan fonem asli dengan spasi (`token_separator`) antar kata.  
+   - `phoneme` diinisialisasi kosong dan akan berisi hasil masking.
+
+4. **Masking per kata**  
+   - Gunakan `np.random.rand()` untuk memutuskan apakah kata dimasker (`word_mask_prob`).  
+   - Jika masking aktif:
+     - Dengan probabilitas `replace_prob`, fonem diganti dengan fonem acak sepanjang kata.  
+     - Sisanya diganti repetisi karakter `token_mask` (`"M"`).
+     - Posisi karakter bertopeng dicatat di `masked_idx_list`.
+   - Jika tidak dimasker, fonem asli ditambahkan apa adanya.
+   - Setelah setiap kata, tambahkan `token_separator` (default `" "`).
+
+   **Sumber fonem acak:**  
+   `phoneme_list = ''.join(phonemes)` sehingga karakter diambil dari seluruh fonem sample untuk menjaga distribusi simbol.
+
+5. **Pemotongan Dinamis (`max_mel_length`)**  
+   - Hitung `mel_length = len(phoneme)`.  
+   - Jika melebihi batas, pilih `random_start` secara seragam.  
+   - Potong `phoneme` dan `labels` pada rentang `[random_start, random_start + max_mel_length)`.  
+   - `masked_index` di-offset ulang agar selaras dengan rentang baru dan dipotong bila berada di luar.
+
+6. **Normalisasi → Tensor**  
+   - `TextCleaner` memetakan tiap karakter ke indeks numerik. Karakter tak dikenal diarahkan ke indeks `dicts['U']`.  
+   - Konversi ke `torch.LongTensor`.
+
+7. **Pengembalian**  
+   Return tuple `(phonemes_tensor, words_tensor, labels_tensor, masked_index)` sesuai detail di atas.
+
+### Edge Case Penting
+
+- **Tokenizer tanpa `eos_token_id`:** `word_separator` menjadi `None`, pemisah kata tidak ditambahkan. `token_lengths` di `Collater` tetap valid karena hanya mem-filter terhadap `pad_id`.
+- **Karakter fonem di luar kamus:** Ditangani oleh `TextCleaner` dengan fallback ke `U`.
+- **Kata tanpa token BPE:** Jika list token kosong, BPE tidak menambah token. Pastikan pra-proses tidak menghasilkan kondisi ini.
+- **Masking di akhir string:** `token_separator` masih ditambahkan, sehingga panjang fonem minimal bertambah satu karakter per kata. Pastikan `max_mel_length` memperhitungkan spasi tambahan ini.
+
+---
+
+## Collater
+
+`Collater` mengemas sample per entri menjadi batch dengan padding dan metadata panjang. Ia menerima parameter opsional:
+
+| Parameter | Default | Penjelasan |
+| --- | --- | --- |
+| `tokenizer` | `None` | Digunakan untuk mengambil `pad_token_id` dan `eos_token_id`. |
+| `return_wave` | `False` | Placeholder untuk kompatibilitas; tidak dipakai di implementasi saat ini. |
+| `debug` | `False` | Saat `True`, dapat dipakai untuk logging manual ketika mengembangkan. |
+
+### Proses `__call__(batch)`
+
+1. **Urutkan sample**  
+   - Hitung `lengths = [phoneme.shape[0] for phoneme, _, _, _ in batch]`.  
+   - Urutkan descending demi efisiensi padding dan mempermudah penggunaan PackedSequence.
+
+2. **Alokasi Tensor Batch**  
+   - `words`: ukuran `(batch_size, max_seq_length)`, diisi `pad_id`.  
+   - `phonemes` dan `labels`: ukuran sama, diisi `0`.  
+   - `masked_indices`: list kosong untuk setiap sample.
+
+3. **Salin Data Per-Baris**  
+   - `seq_len = min(phoneme.size(0), label.size(0), max_seq_length)`.  
+   - `word_len = min(word.size(0), max_seq_length)`.  
+   - Salin slice tensor ke batch arrays.  
+   - Tambahkan `seq_len` ke `input_lengths`.
+
+4. **Panjang Token Valid**  
+   - `word_slice = words[bid, :word_len]`.  
+   - `valid_mask = (word_slice != pad_id)` dan bila `word_separator` tidak `None`, filter tambahan `(word_slice != word_separator)`.  
+   - `token_lengths` menyimpan jumlah token BPE yang akan dipakai oleh loss (menghindari PAD/EOS).
+
+5. **Masked Indices**  
+   - Setiap `masked_index` difilter agar `< seq_len` supaya tidak menunjuk ke padding.
+
+6. **Pengembalian**  
+   Tuple `(words, labels, phonemes, input_lengths, masked_indices, token_lengths)`.
+
+### Properti Output
+
+- Semua tensor bertipe `torch.long`.  
+- `input_lengths` cocok dengan dimensi waktu untuk fitur akustik (fonem).  
+- `token_lengths` memudahkan saat menghitung CTC atau mask attention karena menandai jumlah token non-pad.
+
+### Pertimbangan Kinerja
+
+- Sorting by length meminimalkan padding → mempercepat perhitungan.  
+- Padding dilakukan di CPU, sehingga set `pin_memory=True` di `DataLoader` dapat mengurangi latensi ketika memindahkan ke GPU.
+
+---
+
+## `build_dataloader`
+
+Signature:
 
 ```python
-input_ids = [15342, 20131, 953, 899, 714, 39, 54321]
-phonemes  = ["Aku", "suka", "ˈlɜːnɪŋ", "njuː", "θɪŋz", "ɪn", "Jakarta"]
+def build_dataloader(
+    df,
+    validation=False,
+    batch_size=4,
+    num_workers=1,
+    device="cpu",
+    collate_config=None,
+    dataset_config=None,
+):
+    ...
 ```
 
-Key traits:
-- Exactly one token per word.
-- No subword segmentation.
-- Non-English terms pass through without phonemic conversion.
+### Parameter
 
-### PL-BERT v2 (subword)
-
-```python
-input_ids = [
-  [321, 45],
-  [578, 902],
-  [1049, 332],
-  [221],
-  [407, 15],
-  [55],
-  [611, 912, 57]
-]
-phonemes = ["aku", "suka", "ˈlɜːnɪŋ", "njuː", "θɪŋz", "ɪn", "dʒakarta"]
-```
-
-Key traits:
-- Words may expand to multiple BPE tokens.
-- Phonemes remain aligned at the word level.
-- Bilingual coverage via automatic language detection.
-
-## Masking and Augmentation
-
-| Step | PL-BERT (baseline) | PL-BERT v2 |
+| Parameter | Default | Penjelasan |
 | --- | --- | --- |
-| Masking probability | `word_mask_prob = 0.15` | Same |
-| Replacement policy | 50% chance of random phoneme replacement | Same |
-| Mask symbol | Repeating `"M"` per phoneme character | Same |
-| Random source | `phoneme_list` lookup | Same |
-| Debug logging | None | Optional per-word trace (masking, replacement, truncation) |
+| `df` | — | Dataset mentah (list of dicts, `Dataset` Hugging Face, dsb.) yang dapat diindeks. |
+| `validation` | `False` | Menentukan apakah `shuffle` dimatikan dan `drop_last` dinonaktifkan. |
+| `batch_size` | `4` | Ukuran batch. Poin penting: `drop_last=True` saat training agar bentuk batch konsisten. |
+| `num_workers` | `1` | Jumlah worker untuk proses data paralel. Dengan dataset berat, naikkan angka ini. |
+| `device` | `"cpu"` | Jika selain CPU, `pin_memory=True` untuk optimisasi transfer ke GPU. |
+| `collate_config` | `{}` | Override parameter `Collater`, misal `{"debug": True}`. |
+| `dataset_config` | `{}` | Override parameter `FilePathDataset`, misal `{"max_mel_length": 384}`. |
 
-Verbose log example (v2):
+### Urutan Eksekusi
 
-```
---- Word 3 ---
-  phoneme_word  : ˈlɜːnɪŋ
-  bpe_ids       : [1049, 332]
-  subword_tokens: ['▁learn', 'ing']
-  -> phoneme masked: MMMMMMMM
-```
+1. Buat `dataset = FilePathDataset(df, **dataset_config)`.  
+2. Gunakan tokenizer dari dataset untuk menginisialisasi `Collater`.  
+3. Bangun `DataLoader`:
+   ```python
+   loader = DataLoader(
+       dataset,
+       batch_size=batch_size,
+       shuffle=not validation,
+       num_workers=num_workers,
+       drop_last=not validation,
+       collate_fn=collate_fn,
+       pin_memory=(device != "cpu"),
+   )
+   ```
+4. Kembalikan `loader` untuk dipakai di loop training/validasi.
 
-## Output from `__getitem__`
+### Integrasi dengan `Configs/config.yml`
 
-```
-phonemes_tensor : LongTensor([...])
-words_tensor    : LongTensor([token_ids + eos])
-labels_tensor   : LongTensor([...])
-masked_index    : list[int]
-```
+File konfigurasi biasanya menyediakan `dataset_params` dan `dataloader_params`. Contoh:
 
-Additional behaviour in PL-BERT v2:
-- Dynamic truncation if `mel_length > max_mel_length`.
-- `masked_index` adjusted after truncation.
-- Optional summary logs of the final tensors.
-
-## Collater Behaviour
-
-| Component | PL-BERT (baseline) | PL-BERT v2 |
-| --- | --- | --- |
-| Padding | Manual (`torch.zeros`) | `tokenizer.pad_token_id` |
-| Sorting key | Approximate mel length | Phoneme length |
-| Extra outputs | — | `token_lengths` (valid tokens per sample) |
-| Logging | None | Optional batch summaries |
-| Returned tuple | `(words, labels, phonemes, input_lengths, masked_indices)` | Same + `token_lengths` and debug output |
-
-`token_lengths` masks EOS and PAD values, simplifying downstream CTC loss calculations.
-
-## Batch Output Illustration
-
-```
-# Baseline
-words.shape     = (4, 128)
-phonemes.shape  = (4, 128)
-labels.shape    = (4, 128)
-input_lengths   = [120, 115, 100, 98]
-masked_indices  = [...]
-
-# PL-BERT v2
-words.shape     = (4, 512)
-phonemes.shape  = (4, 512)
-labels.shape    = (4, 512)
-input_lengths   = [490, 455, 430, 400]
-token_lengths   = [78, 74, 69, 65]
+```yaml
+dataset_params:
+  tokenizer: GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct
+  max_mel_length: 512
+  word_mask_prob: 0.15
+dataloader_params:
+  batch_size: 16
+  num_workers: 8
 ```
 
-## Phoneme–Subword Alignment
+Gunakan `dataset_params` sebagai `dataset_config` dan `dataloader_params` untuk argumen `build_dataloader`.
 
-### Background
+---
 
-PL-BERT v2 combines subword tokenization with word-level phoneme sequences. The model therefore observes a many-to-one relationship: a single phoneme sequence maps to one word, while the word may contain several BPE tokens.
+## Ringkasan Alur End-to-End
 
-### Token and Phoneme Example
+1. **Pra-proses** menghasilkan struktur `phonemes` dan `input_ids` per kata.  
+2. **FilePathDataset**:
+   - Flatten token BPE dengan pemisah EOS.
+   - Masking fonem secara acak dengan kontrol probabilitas.
+   - Potong sample panjang dan konversi ke indeks integer.
+3. **Collater**:
+   - Urutkan sample berdasarkan panjang.
+   - Lakukan padding dan hitung metadata panjang.
+4. **build_dataloader** menggabungkan keduanya dalam `torch.utils.data.DataLoader`.
 
-| Word | Subword tokens | Phoneme |
-| --- | --- | --- |
-| Aku | `['▁Aku']` | `/aku/` |
-| suka | `['▁su', 'ka']` | `/suka/` |
-| learning | `['▁learn', 'ing']` | `/ˈlɜːnɪŋ/` |
-| new | `['▁new']` | `/njuː/` |
-| things | `['▁thing', 's']` | `/θɪŋz/` |
-| in | `['▁in']` | `/ɪn/` |
-| Jakarta | `['▁Ja', 'kar', 'ta']` | `/dʒakarta/` |
-
-### Alignment Diagram
-
-```mermaid
-graph LR
-  subgraph "BPE tokens"
-    T1["▁Aku"] --> P1["/aku/"]
-    T2["▁su"] --> P2["/suka/"]
-    T3["ka"] --> P2
-    T4["▁learn"] --> P3["/ˈlɜːnɪŋ/"]
-    T5["ing"] --> P3
-    T6["▁new"] --> P4["/njuː/"]
-    T7["▁thing"] --> P5["/θɪŋz/"]
-    T8["s"] --> P5
-    T9["▁in"] --> P6["/ɪn/"]
-    T10["▁Ja"] --> P7["/dʒakarta/"]
-    T11["kar"] --> P7
-    T12["ta"] --> P7
-  end
-```
-
-Interpretation:
-- Phoneme nodes stay word-aligned on the right.
-- Multiple subword tokens may point to the same phoneme sequence.
-- CTC loss tolerates differing sequence lengths, so strict 1:1 alignment is unnecessary.
-
-### Numerical Representation
-
-```json
-{
-  "input_ids": [
-    [321, 45],
-    [578, 902],
-    [1049, 332],
-    [221],
-    [407, 15],
-    [55],
-    [611, 912, 57]
-  ],
-  "phonemes": [
-    "aku",
-    "suka",
-    "ˈlɜːnɪŋ",
-    "njuː",
-    "θɪŋz",
-    "ɪn",
-    "dʒakarta"
-  ]
-}
-```
-
-During batching:
-- Subword IDs are flattened with EOS separators (`words.extend(bpe_ids); words.append(eos_id)`).
-- Phoneme strings are concatenated (`phoneme += phoneme_word + " "`), then normalised.
-- Resulting tensors resemble:
-
-```text
-words_tensor   = [321, 45, eos, 578, 902, eos, 1049, 332, eos, ...]
-phoneme_tensor = [a, k, u,  , s, u, k, a,  , ˈ, l, ɜ, ː, n, ɪ, ŋ, ...]
-```
-
-## Training Considerations
-
-| Aspect | Notes |
-| --- | --- |
-| Alignment looseness (CTC) | CTC accepts length mismatches between token and phoneme sequences; no per-word padding needed. |
-| Phoneme masking | Still applied per word; subword splits do not change the masking unit. |
-| Subword flexibility | New vocabulary (loanwords, slang) tokenises without manual maps. |
-| Loss characteristics | Longer token sequences increase computation slightly but improve robustness to code-switching. |
-
-## End-to-End Pipeline
-
-```mermaid
-flowchart TD
-    A[Raw text] --> B[Normalise + tokenize .BPE.]
-    B --> C[Subword token IDs]
-    A --> D[Phonemize per word .espeak-ng.]
-    C --> E[Insert EOS separators]
-    D --> F[Concatenate phonemes]
-    E --> G[Word tensor]
-    F --> H[Phoneme tensor]
-    G --> I[Collater: pad + sort]
-    H --> I
-    I --> J[Batch for model input]
-```
-
-## Technical Takeaways
-
-| Pipeline | Observations |
-| --- | --- |
-| PL-BERT (word-level baseline) | Simple 1:1 alignment for monolingual English experiments; relies on manual token maps. |
-| PL-BERT v2 (subword/BPE) | Many-to-one alignment mirrors multilingual input, integrates directly with CTC, and scales without handcrafted maps. |
+Pipeline ini menjaga keselarasan antara fonem dan token subword, memudahkan perhitungan loss berbasis CTC, serta mendukung kode-switching melalui tokenizer dan fonemizer multibahasa.
