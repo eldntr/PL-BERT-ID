@@ -142,7 +142,7 @@ def train():
 
     # Model backbone (ALBERT)
     albert_conf = AlbertConfig(**config['model_params'])  # hidden_size dsb
-    albert_conf.max_position_embeddings = 16384
+    albert_conf.max_position_embeddings = 16384             
     encoder = AlbertModel(albert_conf)
 
     # MultiTask head:
