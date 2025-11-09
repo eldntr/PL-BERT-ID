@@ -24,6 +24,9 @@ logger.setLevel(logging.DEBUG)
 np.random.seed(1)
 random.seed(1)
 
+MAX_PHONEME_LEN = 512
+MAX_BPE_LEN = 256
+
 class FilePathDataset(Dataset):
     def __init__(self, dataset,
                  token_maps="token_maps.pkl",
@@ -75,47 +78,66 @@ class FilePathDataset(Dataset):
         bpe_tensor = torch.LongTensor(bpe_ids)
        
         return {
-            'phoneme': phoneme_tensor,
-            'target_phoneme': target_phoneme_tensor,
-            'bpe_target': bpe_tensor,
+            'phonemes': phoneme_tensor,
+            'target_phonemes': target_phoneme_tensor,
+            'bpe_targets': bpe_tensor,
             'input_length': len(phoneme_tensor),
-            'taget_length': len(bpe_tensor),
+            'target_length': len(bpe_tensor),
             'masked_indices': masked_idx
         }
         
-class Collater(object):
+MAX_PHONEME_LEN = 512
+MAX_BPE_LEN = 256
+
+class Collater:
     def __call__(self, batch):
-        batch_size = len(batch)
-        max_input_len = max([b['input_length'] for b in batch])
-        max_text_length = max([b['taget_length'] for b in batch])
-        
-        phonemes = torch.zeros((batch_size, max_input_len), dtype=torch.long)
+        # Crop per-sample dulu agar tidak ada yang lewat limit
+        cropped = []
+        for b in batch:
+            # nama key bisa sesuaikan milik kamu; contoh umum:
+            ph = b["phonemes"][:MAX_PHONEME_LEN]
+            tph = b["target_phonemes"][:MAX_PHONEME_LEN] if "target_phonemes" in b else b["phonemes"][:MAX_PHONEME_LEN]
+            bp = b["bpe_targets"][:MAX_BPE_LEN]
+            cropped.append({
+                "phonemes": ph,
+                "target_phonemes": tph,
+                "bpe_targets": bp,
+                "input_length": len(ph),
+                "target_length": len(bp),
+                "masked_indices": [i for i in b["masked_indices"] if i < len(ph)]
+            })
+
+        batch = cropped
+
+        B = len(batch)
+        max_in = max(b["input_length"] for b in batch)
+        max_out = max(b["target_length"] for b in batch)
+
+        phonemes = torch.zeros((B, max_in), dtype=torch.long)
         target_phonemes = torch.zeros_like(phonemes)
-        bpe_targets = torch.zeros((batch_size, max_text_length), dtype=torch.long)
-        input_lengths, target_lengths = [], []
-        masked_indices = []
-        
+        bpe_targets = torch.zeros((B, max_out), dtype=torch.long)
+
+        input_lengths, target_lengths, masked_indices = [], [], []
+
         for i, b in enumerate(batch):
-            l_in, l_out = b['input_length'], b['taget_length']
-            phonemes[i, :l_in] = b['phoneme']
-            target_phonemes[i, :l_in] = b['target_phoneme']
-            bpe_targets[i, :l_out] = b['bpe_target']
+            l_in, l_out = b["input_length"], b["target_length"]
+            phonemes[i, :l_in] = torch.as_tensor(b["phonemes"], dtype=torch.long)
+            target_phonemes[i, :l_in] = torch.as_tensor(b["target_phonemes"], dtype=torch.long)
+            bpe_targets[i, :l_out] = torch.as_tensor(b["bpe_targets"], dtype=torch.long)
             input_lengths.append(l_in)
             target_lengths.append(l_out)
-            masked_indices.append(b['masked_indices'])
-        
+            masked_indices.append(b["masked_indices"])
+
         return phonemes, target_phonemes, bpe_targets, input_lengths, target_lengths, masked_indices
 
-def build_dataloader(dataset,
-                     batch_size=4,
-                     num_workers=0,
-                     validation=False,
-                     device='cpu'):
 
+def build_dataloader(dataset, batch_size=4, num_workers=0, validation=False, device='cpu'):
     collate_fn = Collater()
-    return DataLoader(dataset,
-                      batch_size=batch_size,
-                      shuffle=not validation,
-                      collate_fn=collate_fn,
-                      num_workers=num_workers,
-                      pin_memory=(device != 'cpu'))
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=(not validation),
+        num_workers=num_workers,
+        collate_fn=collate_fn,
+        pin_memory=(device != 'cpu')
+    )

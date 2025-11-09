@@ -6,13 +6,7 @@ from collections import OrderedDict
 
 import torch
 from torch import nn
-import torch.nn.functional as F
-
-from accelerate import Accelerator
-from accelerate.utils import LoggerType
-from accelerate import DistributedDataParallelKwargs
-from torch.optim import AdamW  
-
+from accelerate import Accelerator, DistributedDataParallelKwargs
 from transformers import AlbertConfig, AlbertModel, AutoTokenizer
 
 from datasets import load_from_disk
@@ -106,10 +100,13 @@ def maybe_resume(model, optimizer, accelerator, log_dir):
 # Main train
 # ----------------------------
 def train():
+    # Initialize Accelerator with optimizations
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-    accelerator = Accelerator(mixed_precision=mixed_precision,
-                              split_batches=True,
-                              kwargs_handlers=[ddp_kwargs])
+    accelerator = Accelerator(
+        mixed_precision="fp16", 
+        split_batches=True, 
+        kwargs_handlers=[ddp_kwargs]
+    )
 
     # dataset HuggingFace (sudah kamu pakai di versi lama)
     raw_dataset = load_from_disk(data_folder)
@@ -140,24 +137,29 @@ def train():
                                     num_workers=0,
                                     validation=False)
 
-    # Model backbone (ALBERT)
-    albert_conf = AlbertConfig(**config['model_params'])  # hidden_size dsb
-    albert_conf.max_position_embeddings = 16384             
+    # Build model with optimizations
+    albert_conf = AlbertConfig(**config['model_params'])
+    albert_conf.max_position_embeddings = 512  # Limit position embeddings for memory efficiency
     encoder = AlbertModel(albert_conf)
+    if getattr(encoder, "supports_gradient_checkpointing", False):
+        encoder.gradient_checkpointing_enable()  # Enable gradient checkpointing to save VRAM
+    else:
+        accelerator.print("⚠️ Gradient checkpointing not supported for AlbertModel; continuing without it.")
 
-    # MultiTask head:
-    # - mask_predictor: untuk MLM phoneme (dim = phoneme_vocab_size)
-    # - word_predictor: untuk CTC vocab (dim = bpe_vocab_size_ctc)
     model = MultiTaskModel(
         model=encoder,
-        num_tokens=phoneme_vocab_size,        # MLM head
-        num_vocab=bpe_vocab_size_ctc,         # CTC head (+blank)
+        num_tokens=phoneme_vocab_size,
+        num_vocab=tokenizer.vocab_size + 1,  # +1 for blank token (CTC)
         hidden_size=config['model_params']['hidden_size']
     )
 
-    optimizer = AdamW(model.parameters(), lr=config.get("lr", 1e-4))
+    # Loss functions
+    ctc_loss_fn = nn.CTCLoss(blank=0, zero_infinity=True)
+    ce_loss_fn = nn.CrossEntropyLoss()
 
-    # Accelerate prepare
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.get("lr", 1e-4))
+
+    # Prepare for distributed training
     model, optimizer, train_loader = accelerator.prepare(model, optimizer, train_loader)
 
     # resume checkpoint (optional)
@@ -185,15 +187,29 @@ def train():
              target_lengths,
              masked_indices) = batch
 
-            # list -> tensors (on device)
-            input_lengths  = torch.tensor(input_lengths, dtype=torch.long, device=phonemes.device)
-            target_lengths = torch.tensor(target_lengths, dtype=torch.long, device=phonemes.device)
-
-            # attention mask: True untuk valid, False untuk pad
-            text_mask = length_to_mask(input_lengths).to(phonemes.device)  # [B, T]
-            # Accelerate/BERT biasa pakai 1 untuk keep, 0 untuk mask -> invert
-            attention_mask = text_mask.int()  # shape [B, T]
-
+            # Safety crop to prevent OOM from long sequences
+            MAX_PH = 512
+            MAX_BPE = 256
+            phonemes = phonemes[:, :MAX_PH]
+            target_phonemes = target_phonemes[:, :MAX_PH]
+            bpe_targets = bpe_targets[:, :MAX_BPE]
+            
+            # Convert lengths to tensors and apply limits
+            input_lengths = torch.tensor(
+                [min(l, MAX_PH) for l in input_lengths], 
+                dtype=torch.long, 
+                device=phonemes.device
+            )
+            target_lengths = torch.tensor(
+                [min(l, MAX_BPE) for l in target_lengths], 
+                dtype=torch.long, 
+                device=phonemes.device
+            )
+            
+            # Create attention mask (1 for valid tokens, 0 for padding)
+            attn_mask = torch.arange(phonemes.size(1), device=phonemes.device)[None, :] < input_lengths[:, None]
+            attention_mask = attn_mask.int()
+            
             # ----------------------------
             # Forward
             # ----------------------------
@@ -208,40 +224,31 @@ def train():
             loss_token = 0.0
             count_masked = 0
             for i in range(tokens_pred.size(0)):  # per batch sample
-                masked = masked_indices[i]
-                if len(masked) == 0:
+                ms = [m for m in masked_indices[i] if m < tokens_pred.size(1)]
+                if len(ms) == 0:
                     continue
                 # ambil pred/target di posisi masked
-                pred_i   = tokens_pred[i, masked]                 # [M, phoneme_vocab]
-                target_i = target_phonemes[i, masked]             # [M]
+                pred_i   = tokens_pred[i, ms]        # [M, Vp]
+                target_i = target_phonemes[i, ms]  # [M]
                 loss_token += ce_loss_fn(pred_i, target_i)
                 count_masked += 1
-            if count_masked > 0:
-                loss_token = loss_token / count_masked
-            else:
-                loss_token = torch.tensor(0.0, device=phonemes.device)
+            
+            loss_token = loss_token / count_masked if count_masked > 0 else torch.tensor(0.0, device=phonemes.device)
 
             # ----------------------------
             # CTC loss (phoneme -> BPE)
             # ----------------------------
-            # PyTorch CTC butuh:
-            #   log_probs: [T, N, C]
-            #   targets : concat 1-D (sum target lengths)
-            #   input_lengths, target_lengths
-            # Pastikan target BPE di-shift +1 untuk memberi ruang blank=0
+            # Shift targets by +1 to reserve blank=0 for CTC
             targets_concat = []
             for i in range(bpe_targets.size(0)):
                 tlen = target_lengths[i].item()
                 if tlen > 0:
-                    # shift +1
                     targets_concat.append(bpe_targets[i, :tlen] + 1)
-            if len(targets_concat) > 0:
-                targets_concat = torch.cat(targets_concat, dim=0)        # [sum_tgt]
-            else:
-                # corner case: tidak ada target dalam batch
-                targets_concat = torch.empty((0,), dtype=torch.long, device=phonemes.device)
-
-            log_probs = words_pred.log_softmax(dim=-1).permute(1, 0, 2)  # [T, B, C]
+            
+            targets_concat = torch.cat(targets_concat, dim=0) if len(targets_concat) else torch.empty((0,), dtype=torch.long, device=phonemes.device)
+            
+            # CTC expects [T, B, C] format
+            log_probs = words_pred.log_softmax(dim=-1).permute(1, 0, 2)
             loss_vocab = ctc_loss_fn(log_probs, targets_concat, input_lengths, target_lengths)
 
             # ----------------------------
@@ -249,10 +256,10 @@ def train():
             # ----------------------------
             loss = loss_token + loss_vocab
 
+            # Backward pass with gradient clipping
             optimizer.zero_grad(set_to_none=True)
             accelerator.backward(loss)
-            # (opsional) gradient clipping
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
             running_loss += loss.item()
