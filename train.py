@@ -78,21 +78,28 @@ def train():
     )
 
     tokenizer = AutoTokenizer.from_pretrained(config["dataset_params"]["tokenizer"])
-    pad_id = tokenizer.pad_token_id or 0
+    
+    tokenizer.add_special_tokens({"additional_special_tokens": ["[BLANK]"]})
+    tokenizer_blank_id = tokenizer.convert_tokens_to_ids("[BLANK]")  # hanya untuk mask head
+
+    pad_id = tokenizer.pad_token_id
     eos_id = tokenizer.eos_token_id
-    vocab_size_ctc = tokenizer.vocab_size
-    blank_id = 0
-    ctc_output_dim = vocab_size_ctc + 1
+    
+    blank_id = 0 # untuk CTC loss
+    vocab_size_ctc = len(tokenizer)
+    ctc_output_dim = vocab_size_ctc
 
     albert_cfg = AlbertConfig(**config["model_params"])
     bert = AlbertModel(albert_cfg)
+    bert.resize_token_embeddings(vocab_size_ctc)
+    
     bert = MultiTaskModel(
         bert,
-        num_vocab=ctc_output_dim,
-        num_tokens=config["model_params"]["vocab_size"],
+        num_vocab=128,             # phonemizer (CTC head)
+        num_tokens=ctc_output_dim, # tokenizer BPE (MLM head)
         hidden_size=config["model_params"]["hidden_size"],
     ).to(device)
-
+    
     ctc_loss_fn = nn.CTCLoss(blank=blank_id, zero_infinity=True)
     ce_loss_fn = nn.CrossEntropyLoss()
 
