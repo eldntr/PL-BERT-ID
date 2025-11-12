@@ -43,7 +43,16 @@ if wandb_cfg.get("enabled", False):
         name=f"{config['config_name']}_{time.strftime('%Y%m%d_%H%M%S')}",
         config=config,
     )
+    
+import json
 
+def load_phoneme_vocab(path="phoneme_vocab.json"):
+    if not os.path.exists(path):
+        # fallback aman kalau file belum dibuat: pakai 128
+        print("⚠️ phoneme_vocab.json tidak ditemukan; fallback ke 128")
+        return 128, None
+    vocab = json.load(open(path, "r", encoding="utf-8"))
+    return len(vocab), {p:i for i,p in enumerate(vocab)}
 
 def train():
     dataset = load_from_disk(config["data_folder"])
@@ -80,27 +89,33 @@ def train():
     tokenizer = AutoTokenizer.from_pretrained(config["dataset_params"]["tokenizer"])
     
     tokenizer.add_special_tokens({"additional_special_tokens": ["[BLANK]"]})
-    tokenizer_blank_id = tokenizer.convert_tokens_to_ids("[BLANK]")  # hanya untuk mask head
+    tokenizer_blank_id = tokenizer.convert_tokens_to_ids("[BLANK]")
+    
+    assert tokenizer_blank_id != tokenizer.unk_token_id, \
+        f"[BLANK] gagal ditambahkan ke tokenizer. ID: {tokenizer_blank_id}, UNK ID: {tokenizer.unk_token_id}"
 
     pad_id = tokenizer.pad_token_id
     eos_id = tokenizer.eos_token_id
     
-    blank_id = 0 # untuk CTC loss
-    vocab_size_ctc = len(tokenizer)
-    ctc_output_dim = vocab_size_ctc
-
+    vocab_size_total = len(tokenizer)
+    ctc_output_dim = vocab_size_total
+    f"[BLANK] gagal ditambahkan ke tokenizer. ID: {tokenizer_blank_id}, UNK ID: {tokenizer.unk_token_id}"
+      
+    phoneme_vocab_size, phoneme2id = load_phoneme_vocab("phoneme_vocab.json")
+    print("phoneme_vocab_size =", phoneme_vocab_size)
+    
     albert_cfg = AlbertConfig(**config["model_params"])
     bert = AlbertModel(albert_cfg)
-    bert.resize_token_embeddings(vocab_size_ctc)
+    bert.resize_token_embeddings(vocab_size_total) # setelah add sepecial_tokens
     
     bert = MultiTaskModel(
         bert,
-        num_vocab=128,             # phonemizer (CTC head)
-        num_tokens=ctc_output_dim, # tokenizer BPE (MLM head)
+        num_tokens=phoneme_vocab_size,             # phonemizer (CTC head)
+        num_vocab=ctc_output_dim, # tokenizer BPE (MLM head)
         hidden_size=config["model_params"]["hidden_size"],
     ).to(device)
     
-    ctc_loss_fn = nn.CTCLoss(blank=blank_id, zero_infinity=True)
+    ctc_loss_fn = nn.CTCLoss(blank=tokenizer_blank_id, zero_infinity=True)
     ce_loss_fn = nn.CrossEntropyLoss()
 
     optimizer = AdamW(
@@ -196,12 +211,23 @@ def train():
             loss_token = torch.tensor(0.0, device=device)
             count = 0
             for pred, lbl, length, masked in zip(tokens_pred, labels, input_lengths, masked_indices):
-                if len(masked) > 0:
-                    span = lbl[:length][masked].to(device)
-                    if span.numel() == 0:
-                        continue
-                    loss_token += ce_loss_fn(pred[:length][masked].to(device), span)
+                if len(masked) == 0:
+                    continue
+                
+                # logits (M, phoneme_vocab_size), target (M,)
+                logits = pred[:length][masked].to(device)
+                span   = lbl[:length][masked].to(device)
+
+                # filter target ke dalam rentang [0, phoneme_vocab_size)
+                valid = (span >= 0) & (span < phoneme_vocab_size)
+                if valid.any():
+                    loss_token += ce_loss_fn(logits[valid], span[valid])
                     count += 1
+                # (opsional) debug:
+                # else:
+                #     print("Skip masked positions: all out-of-range",
+                #           "max_tgt=", int(span.max().item()),
+                #           "min_tgt=", int(span.min().item()))
             if count > 0:
                 loss_token /= count
 
