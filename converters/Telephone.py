@@ -1,72 +1,65 @@
-
 from singleton_decorator import singleton
-
 import re
 
 @singleton
 class Telephone:
     """
-    Steps:
-    - 1 Convert to lowercase and replace parentheses with dashes
-    - 2 Convert each character in the token
-    - 3 Remove multiple "sil"'s in a row. Also remove "sil" at the start.
-    - 4 Replace subsequent "o"s with "hundred" or "thousand" where applicable
-
-    Note:
-    Telephone contains 0-9, "-", a-z, A-Z, " ", "(", ")"
-    1 case with dots too: 527-28479 U.S. -> five two seven sil two eight four seven nine
-    2 cases with commas too: 116-20, RCA, -> one one six sil two o sil r c a
-                             2 1943-1990, -> two sil one nine four three sil one nine nine o
-    Data is not 100% accurate: 15-16 OCTOBER 1987 -> one five sil one six sil october sil one nine eight seven
-
-    Missed cases:
-    Difference between abbreviations and words:
-    "53-8 FNB MATIES" -> "five three sil eight sil f n b sil maties"
-              instead of "five three sil eight sil f n b sil m a t i e s"
+    Versi Bahasa Indonesia dari converter 'Telephone'.
+    Mengubah nomor telepon, ekstensi, dll. ke format terucap.
+    
+    Contoh (setelah lokalisasi):
+    "081-500" -> "kosong delapan satu sil lima ratus"
+    "x1000" -> "ekstensi satu ribu"
+    "021" -> "kosong dua satu"
     """
     def __init__(self):
         super().__init__()
-        # Translation dict
+        # Kamus terjemahan
         self.trans_dict = {
-            " ": "sil",
+            " ": "sil", # "sil" (silence) digunakan sebagai token internal untuk spasi/jeda
             "-": "sil",
 
-            "x": "extension",
+            "x": "ekstensi", # "extension" -> "ekstensi"
 
-            "0": "o",
-            "1": "one",
-            "2": "two",
-            "3": "three",
-            "4": "four",
-            "5": "five",
-            "6": "six",
-            "7": "seven",
-            "8": "eight",
-            "9": "nine",
+            "0": "kosong",   # "o" -> "kosong"
+            "1": "satu",
+            "2": "dua",
+            "3": "tiga",
+            "4": "empat",
+            "5": "lima",
+            "6": "enam",
+            "7": "tujuh",
+            "8": "delapan",
+            "9": "sembilan",
         }
-        # Regex to filter out parentheses
+        # Regex untuk filter kurung
         self.filter_regex = re.compile(r"[()]")
 
     def convert(self, token: str) -> str:
-        # 1 Convert to lowercase and replace parentheses with dashes
+        # 1 Ubah ke lowercase dan ganti kurung dengan strip
         token = self.filter_regex.sub("-", token.lower())
 
-        # 2 Convert list of characters
+        # 2 Konversi list karakter menggunakan dict terjemahan
         result_list = [self.trans_dict[c] if c in self.trans_dict else c for c in token]
 
-        # 3 Remove multiple "sil"'s in a row. Also remove "sil" at the start.
+        # 3 Hapus "sil" berurutan atau di awal
         result_list = [section for i, section in enumerate(result_list) if section != "sil" or (i - 1 >= 0 and result_list[i - 1] != "sil")]
 
-        # 4 Iterate over result_list and replace multiple "o"s in a row with "hundred" or "thousand", 
-        # but only if preceded with something other than "o" or "sil", and if succeeded with "sil" or the end of the list.
+        # 4 Iterasi dan ganti "kosong" berurutan dengan "ratus" atau "ribu"
+        # (Logika disesuaikan untuk "kosong", "ratus", "ribu")
         i = 0
         while i < len(result_list):
             offset = 0
-            while i + offset < len(result_list) and result_list[i + offset] == "o":
+            while i + offset < len(result_list) and result_list[i + offset] == "kosong":
                 offset += 1
 
-            if (i + offset >= len(result_list) or result_list[i + offset] == "sil") and (i - 1 < 0 or result_list[i - 1] not in ("o", "sil")) and offset in (2, 3):
-                result_list[i : offset + i] = ["hundred"] if offset == 2 else ["thousand"]
+            # Cek kondisi (sebelumnya harus angka, bukan "kosong" atau "sil")
+            if (i + offset >= len(result_list) or result_list[i + offset] == "sil") and \
+               (i - 1 < 0 or result_list[i - 1] not in ("kosong", "sil")) and \
+               offset in (2, 3):
+                
+                # Ganti "kosong kosong" -> "ratus", "kosong kosong kosong" -> "ribu"
+                result_list[i : offset + i] = ["ratus"] if offset == 2 else ["ribu"]
 
             i += 1
 

@@ -1,77 +1,88 @@
-
 from singleton_decorator import singleton
-
 import re, os
 
 @singleton
 class Plain:
     """
-    Steps:
-    - 1 Check for "NaN" edge case
-    - 2 Check whether the token with preserved capitalisation matches the translation dictionary
-    - 3 Check whether token mapped to lowercase matches the translation dictionary
-    - 4 Remove all non-digit and non-letter characters
-    - 5 Split on "strasse". This is the only often occurring case where extra spaces should be added
-
-    Strange cases:
-        "Jan", "Feb" and "Mar" are not converted to "january", "february" and "march" respectively, 
-        while the other months of the year are converted to their full counterparts. 
-        I've opted to convert all months completely.
-
-        Some names, such as "Elisabeth" and "Isaak" are normalized and converted to "elizabeth" and "izaak". I've opted not to support this.
-
-        Sometimes tokens like "NO" are converted to chemistry terms like "nitrogen monoxide". I've opted not to support this.
+    Versi Bahasa Indonesia dari converter 'Plain'.
+    Ini adalah converter "catch-all" untuk token yang tidak
+    terklasifikasi sebagai tipe lain.
     
-    There are 3 "plain.json" files, each with slightly different uses. The one currently being used is one trained very specifically
-    on the training data.
+    Perubahan:
+    - Mengganti kamus 'upper_trans_dict' dan 'trans_dict' dengan
+      singkatan umum Bahasa Indonesia (misal: Jl, Kab, RT, RW).
+    - Menghapus pemuatan 'plain.json' (spesifik B. Inggris).
+    - Menghapus 'split_at' (spesifik B. Jerman).
     """
     def __init__(self):
         super().__init__()
-        # Translation dict for uppercase, full messages
+        # Dict untuk token uppercase (Sensitif huruf besar)
         self.upper_trans_dict = {
-            "DR": "drive", # Also often "Doctor"
-            "ST": "street"
+            "JLN": "jalan",
+            "JL": "jalan",
+            "DS": "desa",
+            "KEL": "kelurahan",
+            "KEC": "kecamatan",
+            "KAB": "kabupaten",
+            "RT": "erte",
+            "RW": "erwe",
+            "NO": "nomor",
+            "DR": "dokter",
+            "H": "haji",
+            "HJ": "hajah",
+            "PT": "perseroan terbatas",
+            "CV": "persekutuan komanditer"
         }
 
-        # Translation dict for converting full messages
+        # Dict untuk token lowercase
         self.trans_dict = {
+            "jln": "jalan",
+            "jl": "jalan",
+            "ds": "desa",
+            "kel": "kelurahan",
+            "kec": "kecamatan",
+            "kab": "kabupaten",
+            "rt": "erte",
+            "rw": "erwe",
+            "no": "nomor",
+            "dr": "dokter",
+            "h": "haji",
+            "hj": "hajah",
+            "pt": "perseroan terbatas",
+            "cv": "persekutuan komanditer"
         }
 
-        # Get data from plain.json file with common UK -> US text conversion
-        with open(os.path.join(os.path.dirname(__file__), "plain.json")) as f:
-            import json
-            self.trans_dict = {**self.trans_dict, **json.load(f)}
+        # Dihapus karena plain.json adalah untuk konversi UK -> US
+        # with open(os.path.join(os.path.dirname(__file__), "plain.json")) as f:
+        #     import json
+        #     self.trans_dict = {**self.trans_dict, **json.load(f)}
 
-        # List of items to split at
-        self.split_at = [
-            "strasse",
-            "weg",
-        ]
+        # Dikosongkan karena "strasse" (Jerman) tidak relevan
+        self.split_at = []
 
-        # Regex to detect where to split
+        # Regex ini sekarang aman karena self.split_at kosong
         self.split_at_regex = re.compile(f"(.*)({'|'.join(self.split_at)})$", flags=re.I)
     
     def convert(self, token: str) -> str:
-        # 1 "NaN" might be passed, which will be considered a float
+        # 1 Kasus "NaN" (float)
         if isinstance(token, float):
             return "NaN"
         
-        # 2 Check whether the token with preserved capitalisation matches the translation dictionary
+        # 2 Cek kamus uppercase
         if token in self.upper_trans_dict:
             return self.upper_trans_dict[token]
 
-        # 3 Check whether token mapped to lowercase matches the translation dictionary
+        # 3 Cek kamus lowercase
         if token.lower() in self.trans_dict:
             return self.trans_dict[token.lower()]
 
-        # 4 Remove all non-digit and non-letter characters. Preserve diacritical marks (eg umlauts, accent grave, etc.)
+        # 4 Hapus karakter non-alfanumerik
+        # Regex ini dipertahankan karena juga menangani diakritik
         token = re.sub(r"[^a-zA-ZÀ-ÖØ-öø-ÿ0-9']", "", token)
 
-        # 5 If the token ends with something specific the string should split at,
-        # Use a regex to detect the location of the split, and convert to lowercase
+        # 5 Logika split (tidak akan berjalan karena self.split_at kosong)
         if token.lower().endswith(tuple(self.split_at)):
             groups = self.split_at_regex.match(token).groups()
-            # Only if the first group is nonempty do we turn the result to lowercase
             if groups[0]:
                 token = " ".join(groups).lower()
 

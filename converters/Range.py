@@ -21,9 +21,8 @@ class Range:
         if len(numbers) == 1 : 
             token = self.cardinal.convert(numbers[0])
         elif len(numbers) == 2 : 
-
             token = self.cardinal.convert(numbers[0])
-            token += ' to '
+            token += ' sampai '
             token += self.cardinal.convert(numbers[1])
 
         else : 

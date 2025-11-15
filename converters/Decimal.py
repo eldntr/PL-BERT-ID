@@ -1,124 +1,151 @@
-
 from singleton_decorator import singleton
-
 import re
-
 from .Digit import Digit
 from .Cardinal import Cardinal
 
 @singleton
 class Decimal:
     """
-    Steps:
-    - 1 Filter out commas
-    - 2 Check for the form "x.y" or ".y", and update the decimal and/or number
-    - 3 Otherwise, check for the form "x" and update the numbers
-    - 4 Check for "billion", "million", etc. suffix
-    - 5 Otherwise, check for "xEy" suffix for the edge cases
-    - 6 Add "point" to output if there is a decimal
-    - 7 Add "zero" only if the decimal is "0", and there is a number in front of the dot, and there is no suffix (if there is a decimal)
-    - 8 Otherwise add digit version of the decimal (if there is a decimal)
-    - 9 If there is a number, add the cardinal of it in front
-    - 10 Add the suffix in front, if one exists
- 
-    Edge cases:
-    3.66E-49 -> three point six six times ten to the minus fourty nine
+    Class ini mengkonversi angka desimal (termasuk notasi ilmiah)
+    ke dalam bentuk terucap Bahasa Indonesia.
+    
+    Diasumsikan input menggunakan format standar (',' sebagai ribuan, '.' sebagai desimal).
+    
+    Contoh:
+    "1,000.5" -> "seribu koma lima"
+    "3.14" -> "tiga koma satu empat"
+    "3.0" -> "tiga koma nol"
+    "3.66E-49" -> "tiga koma enam enam kali sepuluh pangkat minus empat puluh sembilan"
     """
     def __init__(self):
         super().__init__()
-        # Regex to detect input of the sort "x.y" or ".y"
+        # Regex untuk deteksi "x.y" atau ".y" 
         self.decimal_regex = re.compile(r"(-?\d*)\.(\d+)(.*)")
-        # Regex to detect a number
+        # Regex untuk deteksi angka 
         self.number_regex = re.compile(r"(-?\d+)(.*)")
-        # Regex filter to remove commas
+        # Regex filter untuk menghapus koma ribuan
         self.filter_regex = re.compile(r"[,]")
-        # Digit and Cardinal conversion
+        
+        # Konverter Digit and Cardinal
         self.cardinal = Cardinal()
         self.digit = Digit()
-        # List of potential suffixes
+        
+        # Daftar sufiks yang mungkin
         self.suffixes = [
-            "thousand", 
-            "million", 
-            "billion", 
-            "trillion", 
-            "quadrillion", 
-            "quintillion", 
-            "sextillion", 
-            "septillion", 
-            "octillion", 
-            "undecillion", 
-            "tredecillion", 
-            "quattuordecillion", 
-            "quindecillion", 
-            "sexdecillion", 
-            "septendecillion", 
-            "octodecillion", 
-            "novemdecillion", 
-            "vigintillion"
+            "ribu", 
+            "juta", 
+            "miliar", 
+            "triliun", 
+            "kuadriliun", 
         ]
-        # Regular expression to detect the suffixes
-        self.suffix_regex = re.compile(f" *({'|'.join(self.suffixes)})")
-        # Regular expression for xEy
-        self.e_suffix_regex = re.compile(r" *E(-?\d+)")
+        
+        # Regex untuk deteksi sufiks (di-update otomatis dari list di atas)
+        self.suffix_regex = re.compile(f" *({'|'.join(self.suffixes)})", flags=re.I)
+        
+        # Regex untuk notasi ilmiah xEy (tidak diubah)
+        self.e_suffix_regex = re.compile(r" *E(-?\d+)", flags=re.I)
     
     def convert(self, token: str) -> str:
 
-        # 1 Filter out commas
+        def normalize_separators(raw_token: str) -> str:
+            match = re.match(r"(-?[\d.,]+)", raw_token)
+            if not match:
+                return raw_token
+            number_part = match.group(1)
+            rest = raw_token[match.end():]
+
+            last_dot = number_part.rfind(".")
+            last_comma = number_part.rfind(",")
+
+            if "," in number_part and "." in number_part:
+                if last_dot > last_comma:
+                    number_part = number_part.replace(",", "")
+                else:
+                    number_part = number_part.replace(".", "")
+                    number_part = number_part.replace(",", ".", 1)
+            elif "," in number_part:
+                if number_part.count(",") == 1:
+                    number_part = number_part.replace(",", ".", 1)
+                else:
+                    number_part = number_part.replace(",", "")
+            elif "." in number_part:
+                segments = number_part.split(".")
+                if len(segments) > 1 and all(len(segment) == 3 for segment in segments[1:] if segment != ""):
+                    number_part = "".join(segments)
+                else:
+                    number_part = number_part.replace(",", "")
+            else:
+                number_part = number_part.replace(",", "")
+
+            return number_part + rest
+
+        token = normalize_separators(token)
+
+        # 1 Filter koma (ribuan)
         token = self.filter_regex.sub("", token)
 
-        # Variable to store values from the input string
         number = ""
         decimal = ""
 
-        # 2 Check for the form x.y
+        # 2 Cek format x.y
         match = self.decimal_regex.match(token)
         if match:
-            # Get the values before and after the dot
             number = match.group(1)
             decimal = match.group(2)
-            # Update token to remove the decimal
             token = match.group(3)
-
         else:
+            # 3 Cek format x
             match = self.number_regex.match(token)
             if match:
-                # 3 Get the number, and update the token to the remainder
                 number = match.group(1)
                 token = match.group(2)
 
-        # 4 Match suffix, eg billion
+        # 4 Cocokkan sufiks (misal "juta")
         match = self.suffix_regex.match(token)
         suffix = ""
         if match:
-            suffix = match.group(1)
+            suffix = match.group(1).lower() # Ambil sufiks yang cocok
         else:
-            # 5 Otherwise, try to match xEy
+            # 5 Jika tidak, cocokkan notasi ilmiah xEy
             match = self.e_suffix_regex.match(token)
             if match:
-                # Turn the suffix into "times ten to the y"
-                suffix = f"times ten to the {self.cardinal.convert(match.group(1))}"
+                # "times ten to the y" -> "kali sepuluh pangkat y"
+                # `self.cardinal.convert` akan menangani angka negatif (misal "minus empat puluh sembilan")
+                suffix = f"kali sepuluh pangkat {self.cardinal.convert(match.group(1))}"
 
-        # Make list for output
         result_list = []
-        # 6, 7 Only if the decimal is 0, and there is a number in front of the dot, and there is no suffix
-        # then we use "zero" instead of "o".
+        
+        # 6, 7, 8 Logika untuk bagian desimal
         if len(decimal) > 0:
-            result_list.append("point")
+            if suffix == "" and number and decimal.isdigit():
+                if set(decimal) == {"0"}:
+                    if len(decimal) % 3 == 0:
+                        number += decimal
+                    decimal = ""
+                elif len(decimal) % 3 == 0:
+                    number += decimal
+                    decimal = ""
+
+        if len(decimal) > 0:
+            result_list.append("koma")
+            
+            # Kasus spesial untuk ".0" (misal "3.0")
             if decimal == "0" and len(number) > 0 and len(suffix) == 0:
-                result_list.append("zero")
+                result_list.append("nol")
             else:
-                # 8 Otherwise use Digit conversion
+                # Jika tidak, gunakan konversi Digit (misal "14" -> "satu empat")
+                # Ini akan menggunakan class Digit Anda yang sudah dilokalkan
+                # "05" -> "kosong lima"
                 result_list.append(self.digit.convert(decimal))
 
-        # 9 If there is a number (there doesn't have to be), then add it in front
+        # 9 Tambahkan bagian angka di depan (jika ada)
         if number:
             result_list.insert(0, self.cardinal.convert(number))
 
-        # 10 Add the suffix if applicable
+        # 10 Tambahkan sufiks jika ada
         if suffix:
             result_list.append(suffix)
 
-        # 11 Number may be empty. In this case, avoid it.
         result = " ".join(result_list)
         
         return result

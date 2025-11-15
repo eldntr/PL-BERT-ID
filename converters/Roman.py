@@ -6,24 +6,20 @@ import re
 @singleton
 class Roman:
     """
-    Steps:
-    - 1 Get largest section
-    - 2 Check for suffix 's
-    - 3 Apply strict filtering
-    - 4 Calculate total value of roman numeral in integers
-    - 5 Return string representation of total, as well as the suffix
-
-    Special cases:
-    II I -> two
-    IIs  -> two's
-    II.  -> two
+    Class ini mengkonversi angka Romawi (misal: "IV", "VIII.")
+    ke nilai integer dalam bentuk string (misal: "4", "8").
+    
+    Logika ini dipanggil oleh class Cardinal.
+    
+    Perubahan untuk Bahasa Indonesia:
+    - Menghapus deteksi sufiks Inggris (th, nd, st, rd, 's).
     """
     def __init__(self):
         super().__init__()
         # Regex out non-roman numerals
         self.roman_filter_strict_regex = re.compile("[^IVXLCDM]")
         # Regex to detect roman numerals
-        self.roman_filter_regex = re.compile(r"[.IVXLCDM]+(th|nd|st|rd|'s|s)?")
+        self.roman_filter_regex = re.compile(r"[.IVXLCDM]+")
     
         # Roman Numeral value dict
         self.roman_numerals = {
@@ -42,8 +38,6 @@ class Roman:
 
         # 2 Check whether we need to use the suffix "'s"
         suffix = ""
-        if token[-1:] == "s":
-            suffix = "'s"
         
         # 3 Apply strict filtering to remove ".", "'" and "s"
         token = self.roman_filter_strict_regex.sub("", token)
