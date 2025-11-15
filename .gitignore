@@ -1,0 +1,7 @@
+.venv
+wiki*
+wandb
+logs
+__pycache__/
+Checkpoints/
+phoneme_vocab.json
