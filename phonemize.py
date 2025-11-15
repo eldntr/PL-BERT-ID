@@ -40,11 +40,16 @@ def phonemize_word(word: str, ipa: bool, keep_stress: bool, sep: str) -> str:
         return word
 
 def phonemize(text, tokenizer):
+    original_text = text
     normalized_text = normalize_text(text)
+
     words = re.findall(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)*", normalized_text)
+    detok_after = " ".join(words)
 
     input_ids = []
     phonemes = []
+    bpe_tokens = []
+    decoded_tokens = []
 
     for w in words:
         try:
@@ -57,11 +62,19 @@ def phonemize(text, tokenizer):
             continue
 
         input_ids.append(ids)
+        bpe_tokens.append(tokenizer.convert_ids_to_tokens(ids))
+        decoded_tokens.append(tokenizer.decode(ids))
         phonemes.append(phon)
-        
+
+    assert len(input_ids) == len(phonemes), "Word vs phoneme mismatch"
     return {
+        "before": original_text,
+        "after": detok_after,
+        "phoneme_words": words,
         "phonemes": phonemes,
         "input_ids": input_ids,
+        "bpe_tokens": bpe_tokens,
+        "decoded_tokens": decoded_tokens,
     }
 
 
@@ -69,8 +82,15 @@ if __name__ == "__main__":
     sample_text = "hello (dua puluh tiga januari dua ribu dua puluh dua belas sepuluh AM)"
     tokenizer_name = "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
 
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+    except Exception as exc:
+        raise SystemExit(f"Gagal memuat tokenizer '{tokenizer_name}': {exc}") from exc
+
     result = phonemize(sample_text, tokenizer)
 
     print("\nPhonemized output:")
-    print(result)
+    for word, ids, phoneme in zip(result["phoneme_words"], result["input_ids"], result["phonemes"]):
+        decoded = tokenizer.decode(ids).strip()
+        tokens = tokenizer.convert_ids_to_tokens(ids)
+        print(f"{word}\t{phoneme}\t{decoded}\t{tokens}")
