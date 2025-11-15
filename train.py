@@ -9,7 +9,9 @@ import json
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data import DataLoader, DistributedSampler
 
 from datasets import load_from_disk
 from transformers import AutoTokenizer, AlbertConfig
@@ -32,6 +34,7 @@ except ImportError:
 # Konfigurasi (silakan sesuaikan paths & hyperparams)
 # ===========================================================
 config = {
+    "config_name": "plbertv2",  # bebas ganti nama eksperimen
     # path dataset HF (load_from_disk)
     "data_folder": "wikipedia_20220301.id.processed",  # ganti
 
@@ -74,6 +77,7 @@ config = {
     # wandb
     "wandb": {
         "enabled": False,
+        "api_key": "17d379f3ed0a7f3308a45e4fa92f5fba41c72dda",
         "project": "PL-BERT-v2-ID",
         "run_name": "plbertv2_mlm_ctc_upsample"
     }
@@ -95,6 +99,44 @@ def ensure_dir(path: str):
         os.makedirs(path, exist_ok=True)
 
 
+def init_distributed() -> bool:
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    if world_size > 1 and not dist.is_initialized():
+        backend = "nccl" if torch.cuda.is_available() else "gloo"
+        dist.init_process_group(backend=backend)
+        return True
+    return False
+
+
+def is_distributed() -> bool:
+    return dist.is_available() and dist.is_initialized()
+
+
+def is_main_process() -> bool:
+    return (not is_distributed()) or dist.get_rank() == 0
+
+
+def cleanup_distributed():
+    if is_distributed():
+        dist.destroy_process_group()
+
+
+def get_device(cfg):
+    device_str = cfg.get("device", "cpu")
+    if "LOCAL_RANK" in os.environ and torch.cuda.is_available():
+        local_rank = int(os.environ["LOCAL_RANK"])
+        torch.cuda.set_device(local_rank)
+        return torch.device(f"cuda:{local_rank}")
+
+    if device_str.startswith("cuda"):
+        if torch.cuda.is_available():
+            return torch.device(device_str)
+        print("[WARN] CUDA requested but not available. Falling back to CPU.")
+        return torch.device("cpu")
+
+    return torch.device(device_str)
+
+
 def build_phoneme_tokenizer(dataset, vocab_path: str) -> PhonemeTokenizer:
     """
     Jika vocab sudah ada -> load.
@@ -112,23 +154,29 @@ def build_phoneme_tokenizer(dataset, vocab_path: str) -> PhonemeTokenizer:
     return tok
 
 
-def build_dataloader(dataset, phoneme_tokenizer, bpe_tokenizer, config):
+def build_dataloader(dataset, phoneme_tokenizer, bpe_tokenizer, config, distributed=False):
     ds = FilePathDataset(
         dataset=dataset,
         phoneme_tokenizer=phoneme_tokenizer,
         bpe_tokenizer=bpe_tokenizer,
         mlm_ratio=config["mlm_ratio"],
     )
+
+    sampler = DistributedSampler(ds, shuffle=True) if distributed else None
+    device_name = config.get("device_actual") or config.get("device", "cpu")
+    pin_memory = str(device_name).startswith("cuda") and torch.cuda.is_available()
+
     loader = DataLoader(
         ds,
         batch_size=config["batch_size"],
-        shuffle=True,
+        shuffle=(sampler is None),
+        sampler=sampler,
         num_workers=config["num_workers"],
         collate_fn=collater,
-        pin_memory=(config["device"] == "cuda"),
+        pin_memory=pin_memory,
         drop_last=True,
     )
-    return loader
+    return loader, sampler
 
 
 def build_model(ph_tok, bpe_tok, config):
@@ -151,9 +199,10 @@ def build_model(ph_tok, bpe_tok, config):
 def save_checkpoint(save_dir, step, model, optimizer, config):
     ensure_dir(save_dir)
     ckpt_path = osp.join(save_dir, f"step_{step}.pt")
+    model_to_save = model.module if hasattr(model, "module") else model
     payload = {
         "step": step,
-        "model_state": model.state_dict(),
+        "model_state": model_to_save.state_dict(),
         "optimizer_state": optimizer.state_dict(),
         "config": config,
     }
@@ -165,15 +214,22 @@ def save_checkpoint(save_dir, step, model, optimizer, config):
 # TRAIN LOOP
 # ===========================================================
 def train():
-    set_seed(42)
+    distributed = init_distributed()
+    rank = dist.get_rank() if distributed else 0
+    set_seed(42 + rank)
 
-    device = config["device"]
+    device = get_device(config)
+    config["device_actual"] = str(device)
+    config["distributed"] = distributed
+    config["world_size"] = dist.get_world_size() if distributed else 1
+
     ensure_dir(config["save_dir"])
 
     # -------------------------------------------------------
     # 1. Load dataset HF
     # -------------------------------------------------------
-    print(f"[INFO] Loading dataset from {config['data_folder']} ...")
+    if is_main_process():
+        print(f"[INFO] Loading dataset from {config['data_folder']} ...")
     # diasumsikan: setiap item punya key:
     #  - "phonemes": list of string phoneme
     #  - "input_ids": list-of-list BPE ids (dari tokenizer teks LLaMA)
@@ -193,21 +249,45 @@ def train():
     # -------------------------------------------------------
     # 2. Build tokenizers
     # -------------------------------------------------------
-    ph_tok = build_phoneme_tokenizer(dataset, config["phoneme_vocab_path"])
+    if distributed:
+        if rank == 0:
+            ph_tok = build_phoneme_tokenizer(dataset, config["phoneme_vocab_path"])
+        dist.barrier()
+        if rank != 0:
+            ph_tok = PhonemeTokenizer.load(config["phoneme_vocab_path"])
+    else:
+        ph_tok = build_phoneme_tokenizer(dataset, config["phoneme_vocab_path"])
+
     bpe_tok = AutoTokenizer.from_pretrained(config["bpe_tokenizer_name"])
-    print(f"[INFO] BPE vocab size: {bpe_tok.vocab_size}")
+    if is_main_process():
+        print(f"[INFO] BPE vocab size: {bpe_tok.vocab_size}")
 
     # -------------------------------------------------------
     # 3. Build DataLoader
     # -------------------------------------------------------
-    train_loader = build_dataloader(dataset, ph_tok, bpe_tok, config)
+    train_loader, train_sampler = build_dataloader(
+        dataset,
+        ph_tok,
+        bpe_tok,
+        config,
+        distributed=distributed,
+    )
     train_iter = iter(train_loader)
+    epoch = 0
+    if train_sampler is not None:
+        train_sampler.set_epoch(epoch)
 
     # -------------------------------------------------------
     # 4. Build Model + Optimizer
     # -------------------------------------------------------
     model = build_model(ph_tok, bpe_tok, config)
     model = model.to(device)
+
+    if distributed:
+        ddp_kwargs = {}
+        if device.type == "cuda":
+            ddp_kwargs["device_ids"] = [device.index]
+        model = DDP(model, **ddp_kwargs)
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -222,15 +302,26 @@ def train():
     # -------------------------------------------------------
     # 5. (Opsional) wandb init
     # -------------------------------------------------------
-    if config["wandb"]["enabled"] and WANDB_AVAILABLE:
+    wandb_cfg = config.get("wandb", {})
+    wandb_active = False
+    if wandb_cfg.get("enabled", False) and WANDB_AVAILABLE and is_main_process():
+        api_key = wandb_cfg.get("api_key")
+        if api_key:
+            os.environ["WANDB_API_KEY"] = api_key
+
+        default_name = f"{config.get('config_name', 'run')}_{time.strftime('%Y%m%d_%H%M%S')}"
+        run_name = wandb_cfg.get("run_name", default_name)
+
         wandb.init(
-            project=config["wandb"]["project"],
-            name=config["wandb"]["run_name"],
+            project=wandb_cfg["project"],
+            name=run_name,
             config=config,
         )
-        wandb.watch(model)
+        watch_target = model.module if hasattr(model, "module") else model
+        wandb.watch(watch_target)
         print("[INFO] wandb logging enabled.")
-    else:
+        wandb_active = True
+    elif is_main_process():
         print("[INFO] wandb disabled or not available.")
 
     # -------------------------------------------------------
@@ -248,6 +339,9 @@ def train():
         try:
             batch = next(train_iter)
         except StopIteration:
+            epoch += 1
+            if train_sampler is not None:
+                train_sampler.set_epoch(epoch)
             train_iter = iter(train_loader)
             batch = next(train_iter)
 
@@ -299,7 +393,7 @@ def train():
         # ---------------------------------------------------
         # Logging
         # ---------------------------------------------------
-        if step % log_interval == 0:
+        if step % log_interval == 0 and is_main_process():
             dt = time.time() - t0
             t0 = time.time()
 
@@ -311,7 +405,7 @@ def train():
                 f"dt: {dt:.2f}s"
             )
 
-            if config["wandb"]["enabled"] and WANDB_AVAILABLE:
+            if wandb_active:
                 wandb.log({
                     "step": step,
                     "loss": loss.item(),
@@ -323,12 +417,16 @@ def train():
         # ---------------------------------------------------
         # Save checkpoint
         # ---------------------------------------------------
-        if step % save_interval == 0:
+        if step % save_interval == 0 and is_main_process():
             save_checkpoint(config["save_dir"], step, model, optimizer, config)
 
     # final save
-    save_checkpoint(config["save_dir"], step, model, optimizer, config)
-    print("[INFO] Training finished.")
+    if is_main_process():
+        save_checkpoint(config["save_dir"], step, model, optimizer, config)
+        print("[INFO] Training finished.")
+
+    if distributed:
+        cleanup_distributed()
 
 
 if __name__ == "__main__":
