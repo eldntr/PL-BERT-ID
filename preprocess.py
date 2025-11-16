@@ -1,11 +1,10 @@
 import json
 import yaml
 
-config_path = "Configs/config.yml" # you can change it to anything else
+config_path = "Configs/config.yml"
 config = yaml.safe_load(open(config_path))
 
 from phonemize import phonemize
-
 from transformers import AutoTokenizer
 
 try:
@@ -32,9 +31,10 @@ try:
 except Exception as e:
     print(f"An error occurred while loading the dataset: {e}")
     
-root_directory = "./wiki_phoneme" # set up root directory for multiprocessor processing
+root_directory = "./wiki_phoneme"
 
 import os
+import re
 num_shards = 50000
 
 def process_shard(i):
@@ -44,11 +44,29 @@ def process_shard(i):
         return
     print('Processing shard %d ...' % i)
     shard = dataset.shard(num_shards=num_shards, index=i)
+    
+    print(f'Shard {i}: Original size = {len(shard)}')
+    
+    # Process with phonemize - akan return None jika > 50 kata
     processed_dataset = shard.map(
-        lambda t: phonemize(t['text'], tokenizer),
+        lambda t: phonemize(t['text'], tokenizer, max_words=50),
         remove_columns=['text'],
         load_from_cache_file=False
     )
+    
+    # Filter out None results (rows dengan > 50 kata)
+    processed_dataset = processed_dataset.filter(
+        lambda x: x.get('phonemes') is not None,
+        load_from_cache_file=False
+    )
+    
+    print(f'Shard {i}: Filtered size = {len(processed_dataset)} (kept {len(processed_dataset)/len(shard)*100:.1f}%)')
+    
+    # Skip jika tidak ada data setelah filter
+    if len(processed_dataset) == 0:
+        print(f'Shard {i}: No data after filtering, skipping...')
+        return
+    
     if not os.path.exists(directory):
         os.makedirs(directory)
 
@@ -90,10 +108,10 @@ def process_shard(i):
 from pebble import ProcessPool
 from concurrent.futures import TimeoutError
 
-max_workers = 32 # change this to the number of CPU cores your machine has 
+max_workers = 32
 
-with ProcessPool(max_workers=max_workers) as pool:
-    pool.map(process_shard, range(num_shards), timeout=60)
+# with ProcessPool(max_workers=max_workers) as pool:
+#     pool.map(process_shard, range(num_shards), timeout=60)
 
 # process_shard(1)
 

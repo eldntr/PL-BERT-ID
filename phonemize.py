@@ -39,11 +39,27 @@ def phonemize_word(word: str, ipa: bool, keep_stress: bool, sep: str) -> str:
     except (subprocess.TimeoutExpired, Exception):
         return word
 
-def phonemize(text, tokenizer):
+def phonemize(text, tokenizer, max_words=50):
+    """
+    Phonemize text. Returns None if text has more than max_words.
+    
+    Args:
+        text: Input text
+        tokenizer: HuggingFace tokenizer
+        max_words: Maximum number of words allowed (default: 50)
+    
+    Returns:
+        dict with phonemized data, or None if text exceeds max_words
+    """
     original_text = text
     normalized_text = normalize_text(text)
 
     words = re.findall(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)*", normalized_text)
+    
+    # Check word count - return None if too many words
+    if len(words) > max_words:
+        return None
+    
     detok_after = " ".join(words)
 
     input_ids = []
@@ -87,10 +103,13 @@ if __name__ == "__main__":
     except Exception as exc:
         raise SystemExit(f"Gagal memuat tokenizer '{tokenizer_name}': {exc}") from exc
 
-    result = phonemize(sample_text, tokenizer)
-
-    print("\nPhonemized output:")
-    for word, ids, phoneme in zip(result["phoneme_words"], result["input_ids"], result["phonemes"]):
-        decoded = tokenizer.decode(ids).strip()
-        tokens = tokenizer.convert_ids_to_tokens(ids)
-        print(f"{word}\t{phoneme}\t{decoded}\t{tokens}")
+    result = phonemize(sample_text, tokenizer, max_words=50)
+    
+    if result is None:
+        print("Text skipped: too many words (>50)")
+    else:
+        print("\nPhonemized output:")
+        for word, ids, phoneme in zip(result["phoneme_words"], result["input_ids"], result["phonemes"]):
+            decoded = tokenizer.decode(ids).strip()
+            tokens = tokenizer.convert_ids_to_tokens(ids)
+            print(f"{word}\t{phoneme}\t{decoded}\t{tokens}")
